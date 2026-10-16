@@ -1,0 +1,85 @@
+# Bookworm default configuration.
+# Copy to config/local.yaml (git-ignored) for rig-specific tweaks:
+#   python -m bookworm run --config config/local.yaml
+
+camera:
+  source: viam          # viam | opencv (local webcam) | folder (--images DIR)
+  viam_name: cam        # camera component name in the Viam app
+  index: 0              # opencv only: camera index
+  width: 1920
+  height: 1080
+  warmup_frames: 5      # opencv only: frames discarded so auto-exposure can settle
+
+vision:
+  # Four corners of the open book in the raw camera frame (pixels),
+  # order: top-left, top-right, bottom-right, bottom-left.
+  # Set with:  python -m bookworm calibrate
+  # null = use the full frame.
+  book_corners: null
+  warp_size: [1600, 1100]       # output size (w, h) of the flattened spread
+  min_sharpness: 60.0           # variance-of-Laplacian; below = blurry, recapture
+  max_capture_retries: 3
+  # Clamp fingers hide text. Two ways to remove them before OCR:
+  # 1) fixed rectangles in normalized spread coords [x0, y0, x1, y1]
+  clamp_masks:
+    - [0.00, 0.40, 0.06, 0.60]  # left clamp finger
+    - [0.94, 0.40, 1.00, 0.60]  # right clamp finger
+  # 2) colour masking: print/paint fingers a colour that never appears in books.
+  #    HSV ranges (OpenCV: H 0-179). null disables.
+  clamp_color_hsv: [[40, 80, 60], [85, 255, 255]]   # bright green
+  page_number_region: 0.08      # bottom fraction of each page searched for page number
+
+ocr:
+  lang: eng
+  psm: 3                # tesseract page segmentation mode (3 = auto, 6 = single block)
+  min_word_conf: 50     # drop words below this confidence
+  min_page_conf: 55     # page mean confidence below this => "could not read"
+  min_words_for_text: 5 # fewer words than this => treat page as blank
+
+verify:
+  change_threshold: 0.08        # normalized image difference that counts as "page changed"
+  max_flip_retries: 2
+
+speech:
+  engine: pyttsx3       # pyttsx3 | print
+  rate: 170             # words per minute
+
+hardware:
+  backend: viam         # viam | mock   (Viam credentials come from .env)
+  # Servo component names as configured in the Viam app (CONFIGURE tab).
+  components:
+    clamp_left: clamp-left
+    clamp_right: clamp-right
+    lift: eraser-lift
+    arm: flip-arm
+  # Servo angles — tune on the rig. Clamp values may be a number or {left: .., right: ..}
+  # if the two clamps are mounted mirrored.
+  angles:
+    clamp_engaged: {left: 90, right: 90}
+    clamp_released: {left: 30, right: 150}
+    lift_down: 60
+    lift_up: 120
+
+# The page-flip motion as a list of primitive steps. Tune this on the rig
+# without touching code. Primitives:
+#   clamp: {side: left|right, engaged: true|false}
+#   lift:  {down: true|false}            # eraser on / off the page
+#   arm:   {angle: 0-180}                # 0 = over right page, 180 = over left page
+#   wait:  {s: seconds}
+flip_sequence:
+  - {arm: {angle: 10}}                   # park eraser over right-page outer edge
+  - {clamp: {side: right, engaged: false}}
+  - {lift: {down: true}}                 # eraser touches top page
+  - {arm: {angle: 25}}                   # drag inward: friction buckles/lifts the page
+  - {wait: {s: 0.3}}
+  - {lift: {down: false}}
+  - {clamp: {side: left, engaged: false}}
+  - {arm: {angle: 175}}                  # sweep lifted page across to the left
+  - {clamp: {side: left, engaged: true}} # pin the turned page
+  - {arm: {angle: 10}}                   # return
+  - {clamp: {side: right, engaged: true}}
+
+run:
+  read_order: [left, right]
+  blank_spreads_to_stop: 2      # consecutive blank spreads => end of book
+  save_dir: runs                # every capture + OCR text saved here for debugging

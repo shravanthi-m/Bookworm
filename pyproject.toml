@@ -1,0 +1,9 @@
+[project]
+name = "bookworm"
+version = "0.1.0"
+description = "Page-turning, book-reading robot (Viam + OpenCV + Tesseract)"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

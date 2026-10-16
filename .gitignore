@@ -1,0 +1,19 @@
+# Secrets — Viam API keys live here. NEVER commit.
+.env
+.env.*
+!.env.example
+*.key
+viam.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+
+# Local data / overrides
+runs/
+config/local.yaml
+.DS_Store
