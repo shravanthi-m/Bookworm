@@ -1,0 +1,41 @@
+# Bookworm hand-picked arm positions (armfarm01, xArm850). Recorded with Midhat.
+# joints = degrees J1..J6 (exact way to return); pose = world-frame end position (mm, deg).
+start:                        # v3 (replaces v2: joints 86.87,-70.06,-93.97,-55.22,-81.92,248.75)
+  recorded: 2026-10-16
+  joints: [87.52, -77.0, -105.07, -51.73, -89.25, 248.75]
+  pose: {x: 99.28, y: 660.53, z: 119.16, o_x: 0.76, o_y: -0.57, o_z: -0.30, theta: -88.44}
+
+out_of_the_way:               # arm parked clear of the book (not part of the flip path)
+  recorded: 2026-10-16
+  joints: [78.46, -76.97, -128.71, -54.39, -99.35, 248.75]
+  pose: {x: 223.58, y: 733.95, z: 274.36, o_x: 0.69, o_y: -0.63, o_z: -0.35, theta: -68.28}
+
+# The page-flip path, in order. Point 1 is `start` above.
+flip_path:
+  - name: start
+  - name: deep                # point 2 v2: deep into the page (replaces v1: joints 77.35,-70.06,-93.97,-55.23,-81.83,248.75)
+    recorded: 2026-10-16
+    joints: [78.21, -77.0, -105.08, -51.73, -89.26, 248.75]
+    pose: {x: 204.88, y: 635.82, z: 119.27, o_x: 0.66, o_y: -0.69, o_z: -0.30, theta: -88.43}
+  - name: lift                # point 3 v2: lift so the page catches on the far side of the pencil (replaces v1: joints 76.65,-70.06,-93.92,-55.23,-95.81,248.75)
+    recorded: 2026-10-16
+    joints: [78.23, -77.0, -105.08, -51.73, -98.86, 248.75]
+    pose: {x: 202.56, y: 629.70, z: 132.83, o_x: 0.63, o_y: -0.76, o_z: -0.15, theta: -89.29}
+  - name: 3b                  # point 3b: release page, so it catches on the other side of the pencil (between lift and press_down)
+    recorded: 2026-10-16
+    joints: [78.6, -77.01, -105.51, -56.28, -98.39, 248.75]
+    pose: {x: 204.14, y: 637.69, z: 136.90, o_x: 0.70, o_y: -0.70, o_z: -0.13, theta: -87.63}
+  - name: press_down          # point 4 v2: press down (replaces v1: joints 75.39,-57.56,-74.36,-47.53,-69.39,248.75)
+    recorded: 2026-10-16
+    joints: [73.48, -61.99, -83.67, -35.83, -78.5, 248.75]
+    pose: {x: 214.78, y: 542.60, z: 163.65, o_x: 0.36, o_y: -0.80, o_z: -0.48, theta: -96.99}
+  - name: push_back           # point 5 v3: pulls back further (replaces v2: joints 73.48,-61.99,-85.86,-35.83,-78.5,248.75)
+    recorded: 2026-10-16
+    joints: [73.48, -61.99, -88.09, -35.83, -78.52, 248.75]
+    pose: {x: 222.94, y: 570.28, z: 183.05, o_x: 0.37, o_y: -0.76, o_z: -0.53, theta: -93.59}
+  - name: final               # point 6 v2: final position of the paper, then return to start (replaces v1: joints 73.07,-57.56,-74.25,-47.53,-69.4,248.75)
+    recorded: 2026-10-16
+    joints: [72.1, -61.99, -83.62, -35.84, -78.51, 248.75]
+    pose: {x: 227.74, y: 536.93, z: 163.46, o_x: 0.34, o_y: -0.81, o_z: -0.48, theta: -97.02}
+  - name: lift                # return via point 3 so the pencil doesn't drag the paper
+  - name: start               # back to point 1, ready for the next page
