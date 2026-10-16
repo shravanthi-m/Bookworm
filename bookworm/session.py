@@ -121,7 +121,7 @@ class BookSession:
 
     def _page_number(self, pages) -> int | None:
         frac = self.cfg["vision"]["page_number_region"]
-        futs = {s: self.pool.submit(self.ocr.page_number, pages[s].binary, frac)
+        futs = {s: self.pool.submit(self.ocr.page_number, pages[s].ocr, frac)
                 for s in ("left", "right") if s in pages}
         nums = {s: f.result() for s, f in futs.items()}
         if nums.get("left") is not None:
@@ -157,7 +157,7 @@ class BookSession:
                 return FlipOutcome.OK, None              # photo playback finished
             after = self.capture_spread()
             side = "left" if "left" in before.pages else "right"
-            outcome = classify_flip(before.pages[side].binary, after.pages[side].binary,
+            outcome = classify_flip(before.pages[side].ocr, after.pages[side].ocr,
                                     before.page_no, after.page_no, self.cfg["verify"]["change_threshold"])
             log.info("flip attempt %d: %s (pages %s -> %s)", attempt + 1, outcome.value,
                      before.page_no, after.page_no)
@@ -197,7 +197,7 @@ class BookSession:
         blanks = 0
         while True:
             with self._timed("ocr"):
-                futs = {side: self.pool.submit(self.ocr.read, page.binary) for side, page in spread.pages.items()}
+                futs = {side: self.pool.submit(self.ocr.read, page.ocr) for side, page in spread.pages.items()}
                 results = {side: f.result() for side, f in futs.items()}
             self._save_debug(summary.spreads, spread, results)
             with self._timed("handler"):

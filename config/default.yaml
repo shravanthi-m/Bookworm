@@ -55,7 +55,7 @@ vision:
   # four corners of the spread in the raw image, TL, TR, BR, BL (pixels). null = full frame.
   book_corners: null
   fallback_warp_size: [1600, 1100]
-  min_sharpness: 60.0       # variance-of-Laplacian; below = blurry, recapture
+  min_sharpness: 30.0       # variance-of-Laplacian; below = blurry, recapture (real page frames: ~40-60)
   max_capture_retries: 3
   settle_s: 0.5             # pause after arm moves before capturing (vibration)
   # Page holders hide text. Print them in a colour that never appears in books
@@ -65,6 +65,7 @@ vision:
   # Pencil/gripper mask in wrist-camera pixels (the tool is fixed relative to the camera).
   # Build with: python -m bookworm calibrate-tool-mask   (writes the path into config/local.yaml)
   tool_mask: null
+  ocr_input: gray           # gray (flatten + sharpen, Tesseract binarises) | binary (our adaptive threshold)
   page_number_region: 0.08  # bottom/top fraction of each page searched for page number
   corner_search_mm: 25      # vision corner must be within this of the calibrated corner
 

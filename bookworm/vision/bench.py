@@ -39,13 +39,13 @@ def word_accuracy(truth: str, hyp: str) -> float:
 
 
 def _panel(frame, pages, outline_px=None, quad_px=None, h=500):
-    """Side-by-side debug image: raw frame with detections | colour pages | binary pages."""
+    """Side-by-side debug image: raw frame with detections | colour pages | OCR-input pages."""
     raw = frame.copy()
     if outline_px is not None:
         cv2.polylines(raw, [outline_px.astype(np.int32)], True, (0, 255, 255), 4)   # detected paper
     if quad_px is not None:
         cv2.polylines(raw, [quad_px.astype(np.int32)], True, (255, 0, 255), 4)      # calibrated book
-    tiles = [raw] + [p.color for p in pages.values()] + [cv2.cvtColor(p.binary, cv2.COLOR_GRAY2BGR)
+    tiles = [raw] + [p.color for p in pages.values()] + [cv2.cvtColor(p.ocr, cv2.COLOR_GRAY2BGR)
                                                          for p in pages.values()]
     tiles = [cv2.resize(t, (max(1, int(t.shape[1] * h / t.shape[0])), h)) for t in tiles]
     return np.hstack(tiles)
@@ -83,9 +83,9 @@ class VisionBench:
 
         t1 = time.perf_counter()
         for side, page in pages.items():
-            res = self.ocr.read(page.binary)
+            res = self.ocr.read(page.ocr)
             pr = {"words": res.word_count, "conf": round(res.mean_conf, 1),
-                  "page_no": self.ocr.page_number(page.binary, v["page_number_region"]),
+                  "page_no": self.ocr.page_number(page.ocr, v["page_number_region"]),
                   "readable": res.mean_conf >= self.cfg["ocr"]["min_page_conf"]}
             truth = truth_dir / f"{Path(name).stem}.{side}.txt" if truth_dir else None
             if truth and truth.exists():
@@ -99,9 +99,9 @@ class VisionBench:
         page_no = rec["pages"][side]["page_no"]
         if self._prev is not None:
             prev_bin, prev_no = self._prev
-            rec["flip_vs_previous"] = classify_flip(prev_bin, pages[side].binary, prev_no, page_no,
+            rec["flip_vs_previous"] = classify_flip(prev_bin, pages[side].ocr, prev_no, page_no,
                                                     self.cfg["verify"]["change_threshold"]).value
-        self._prev = (pages[side].binary, page_no)
+        self._prev = (pages[side].ocr, page_no)
 
         cv2.imwrite(str(self.out / f"{Path(name).stem}.panel.jpg"), _panel(frame, pages, outline, quad))
         self.results.append(rec)

@@ -59,7 +59,9 @@ def test_mask_color_removes_green_holder():
 def test_process_shot_spread_and_single_page():
     pages = process_shot(make_spread(), "spread", VCFG)
     assert set(pages) == {"left", "right"}
-    assert set(np.unique(pages["left"].binary)) <= {0, 255}
+    assert pages["left"].ocr.ndim == 2
+    binary = process_shot(make_spread(), "spread", {**VCFG, "ocr_input": "binary"})
+    assert set(np.unique(binary["left"].ocr)) <= {0, 255}
     assert pages["left"].color.ndim == 3
     # fallback (no geometry) for a single-page region still splits the spread
     assert set(process_shot(make_spread(), "right", VCFG)) == {"right"}
@@ -133,8 +135,8 @@ def test_tesseract_end_to_end():
 
     pages = process_shot(make_spread(), "spread", VCFG)
     ocr = TesseractOcr()
-    assert "hello" in ocr.read(pages["left"].binary).text.lower()
-    assert ocr.page_number(pages["left"].binary, 0.08) == 12
+    assert "hello" in ocr.read(pages["left"].ocr).text.lower()
+    assert ocr.page_number(pages["left"].ocr, 0.08) == 12
 
 
 def test_word_accuracy():

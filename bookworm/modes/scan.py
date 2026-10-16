@@ -30,7 +30,7 @@ class Scanner:
             n = len(self.pages) + 1
             page, res = spread.pages[side], results[side]
             stem = self.out / "pages" / f"{n:04d}"
-            cv2.imwrite(str(stem.with_suffix(".png")), page.color if save_color else page.binary)
+            cv2.imwrite(str(stem.with_suffix(".png")), page.color if save_color else page.ocr)
             stem.with_suffix(".txt").write_text(res.text + "\n")
             printed = None
             if spread.page_no is not None:

@@ -274,9 +274,9 @@ def cmd_ocr(cfg, args):
     print(f"sharpness: {sharpness(frame):.1f}")
     for side, page in pages.items():
         cv2.imwrite(str(debug / f"{side}_color.png"), page.color)
-        cv2.imwrite(str(debug / f"{side}_binary.png"), page.binary)
-        res = ocr.read(page.binary)
-        pn = ocr.page_number(page.binary, cfg["vision"]["page_number_region"])
+        cv2.imwrite(str(debug / f"{side}_ocr.png"), page.ocr)
+        res = ocr.read(page.ocr)
+        pn = ocr.page_number(page.ocr, cfg["vision"]["page_number_region"])
         print(f"\n=== {side}: page {pn}, conf {res.mean_conf:.0f}, {res.word_count} words ===\n{res.text}")
     print(f"\ndebug images in {debug}/")
 
