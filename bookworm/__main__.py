@@ -2,7 +2,8 @@
 
 Modes
     read                   read the book aloud, turning pages (Ctrl+C to stop)
-    scan --out DIR         non-destructive scan: page images + text + PDF
+    scan --out DIR         non-destructive scan: page images + text + searchable PDF
+    pdf SCAN_DIR           (re)build the searchable PDF of a scan folder
 
 Setup / calibration (writes config/local.yaml)
     check                  connect to Viam, list components, read arm pose + camera calibration
@@ -372,6 +373,14 @@ def cmd_watch_flip(cfg, args):
     watch_flip(cfg, args)
 
 
+def cmd_pdf(cfg, args):
+    from .archive import build_pdf
+
+    build_pdf(args.scan_dir, args.out, searchable=not args.no_text, lang=cfg["ocr"]["lang"],
+              psm=cfg["ocr"]["psm"], page_width_mm=cfg["book"]["page_width_mm"],
+              ocr_input=cfg["vision"].get("ocr_input", "gray"))
+
+
 def cmd_ocr(cfg, args):
     from .vision import TesseractOcr, process_shot, sharpness
 
@@ -472,6 +481,10 @@ def main(argv=None):
     wf.add_argument("--fps", type=float, default=8.0)
     wf.add_argument("--max-deviation", type=float, help="override vision.flip_monitor.max_deviation")
     wf.add_argument("--say", action="store_true", help="also say 'stop' out loud on STOP")
+    pdf = sub.add_parser("pdf", help="(re)build a searchable PDF from a scan folder")
+    pdf.add_argument("scan_dir")
+    pdf.add_argument("--out", help="output file (default <scan_dir>/book.pdf)")
+    pdf.add_argument("--no-text", action="store_true", help="images only, no OCR text layer")
     o = sub.add_parser("ocr")
     o.add_argument("image")
     f = sub.add_parser("flip")
@@ -486,7 +499,7 @@ def main(argv=None):
     handlers = {"read": cmd_read, "scan": cmd_scan, "check": cmd_check, "pencil": cmd_pencil,
                 "save-pose": cmd_save_pose, "calibrate-book": cmd_calibrate_book,
                 "calibrate-tool-mask": cmd_calibrate_tool_mask, "calibrate-view": cmd_calibrate_view,
-                "webcams": cmd_webcams, "watch-flip": cmd_watch_flip,
+                "webcams": cmd_webcams, "watch-flip": cmd_watch_flip, "pdf": cmd_pdf,
                 "overlay": cmd_overlay, "vision": cmd_vision, "ocr": cmd_ocr, "flip": cmd_flip}
     handlers[args.cmd](cfg, args)
 

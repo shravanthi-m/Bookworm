@@ -53,6 +53,7 @@ modes:
     shots: [{pose: scan_left, region: left}, {pose: scan_right, region: right}]
     px_per_mm: 12           # ~300 dpi archival scan
     save_color: true
+    searchable_pdf: true    # book.pdf gets an invisible OCR text layer (search / copy / reuse the text)
 
 vision:
   # Fallback when camera geometry is unavailable (mock / --images photos):

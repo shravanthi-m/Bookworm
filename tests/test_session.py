@@ -158,3 +158,29 @@ def test_read_and_save_scan_together(tmp_path):
     session.run()
     assert len(speaker.spoken) >= 4
     assert (tmp_path / "book.pdf").exists() and len(list((tmp_path / "pages").glob("*.png"))) == 4
+
+
+def test_searchable_pdf_has_text_layer(tmp_path):
+    import shutil
+
+    import cv2
+    import pytest
+    from pypdf import PdfReader
+
+    if shutil.which("tesseract") is None:
+        pytest.skip("tesseract not installed")
+    from bookworm.archive import build_pdf
+
+    (tmp_path / "pages").mkdir()
+    img = np.full((1100, 800, 3), 245, np.uint8)
+    for i, line in enumerate(["The quick brown fox", "jumps over the lazy dog", "Spinoza and Descartes"]):
+        cv2.putText(img, line, (40, 150 + 90 * i), cv2.FONT_HERSHEY_SIMPLEX, 1.4, (0, 0, 0), 3)
+    cv2.circle(img, (400, 800), 150, (40, 120, 200), -1)                     # an "illustration"
+    cv2.imwrite(str(tmp_path / "pages" / "0001.png"), img)
+    pdf = build_pdf(tmp_path, page_width_mm=140)
+    reader = PdfReader(pdf)
+    assert len(reader.pages) == 1
+    text = reader.pages[0].extract_text().lower()
+    assert "brown fox" in text and "spinoza" in text
+    w_in = float(reader.pages[0].mediabox.width) / 72
+    assert abs(w_in - 140 / 25.4) < 0.1                                     # real page size
