@@ -69,12 +69,13 @@ class ViamConnection:
 
 
 class ViamRobot(Robot):
-    def __init__(self, conn: ViamConnection, arm: str, gripper: str, camera: str, **_):
+    def __init__(self, conn: ViamConnection, arm: str, gripper: str, camera: str,
+                 camera_calibrated: bool = True, **_):
         from viam.components.arm import Arm
         from viam.components.camera import Camera
         from viam.components.gripper import Gripper
 
-        self.conn, self.camera_name = conn, camera
+        self.conn, self.camera_name, self.camera_calibrated = conn, camera, camera_calibrated
         self.arm = conn.component(Arm, arm)
         self.grip = conn.component(Gripper, gripper)
         self.cam = conn.component(Camera, camera)
@@ -102,7 +103,10 @@ class ViamRobot(Robot):
     def capture(self):
         # RealSense returns 'color' (jpeg, ~70 KB) and 'depth' (~1.8 MB). Asking for colour only
         # cut capture from ~485 ms to ~31 ms on the rig.
-        images, _ = self.conn.call(self.cam.get_images(filter_source_names=["color"]))
+        try:
+            images, _ = self.conn.call(self.cam.get_images(filter_source_names=["color"]))
+        except Exception:  # noqa: BLE001 - e.g. a webcam has no source called "color"
+            images = []
         if not images:
             images, _ = self.conn.call(self.cam.get_images())
         color = [im for im in images if not im.mime_type.startswith("image/vnd.viam.dep")]
@@ -144,6 +148,8 @@ class ViamRobot(Robot):
         return T
 
     def camera_geometry(self):
+        if not self.camera_calibrated:
+            return None     # static uncalibrated camera (e.g. phone): use clicked book_corners instead
         if self._intrinsics is None:
             self._load_intrinsics()
         K, dist, (w, h) = self._intrinsics

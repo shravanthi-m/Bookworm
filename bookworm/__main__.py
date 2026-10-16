@@ -10,11 +10,14 @@ Setup / calibration (writes config/local.yaml)
     save-pose NAME         store the arm's current pose (home, overview, scan_left, scan_right)
     calibrate-book         touch the eraser to 3 book points to define the book frame
     calibrate-tool-mask    mask the pencil out of the wrist camera (frames from a few views)
+    calibrate-view         fixed camera (e.g. phone): click the spread's 4 corners once
+    webcams                list local cameras on this computer (find the phone's index)
     overlay POSE           move to POSE, draw the projected book outline -> runs/overlay.jpg
 
 Development
     vision --images DIR    vision-only test bench on photos (accuracy report, debug panels)
-    vision --live          same, on the live wrist camera — never moves the arm
+    vision --live          same, on the live Viam camera — never moves the arm
+    vision --webcam N      same, on a local camera (e.g. iPhone Continuity Camera), no Viam needed
     ocr IMAGE              vision pipeline on one photo; debug images in runs/debug/
     flip [--times N]       run the flip motion only (tuning)
 """
@@ -223,8 +226,94 @@ def cmd_overlay(cfg, args):
 
 
 # ---- development --------------------------------------------------------------
+def _webcam_frame(index: int, cap=None):
+    """One frame from a local camera (e.g. iPhone Continuity Camera on the Mac)."""
+    own = cap is None
+    if own:
+        cap = cv2.VideoCapture(index)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 3840)       # ask for the max; the driver picks the nearest
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 2160)
+    if not cap.isOpened():
+        sys.exit(f"cannot open local camera {index} (try: python -m bookworm webcams)")
+    for _ in range(10):                               # let exposure / autofocus settle
+        cap.read()
+    ok, frame = cap.read()
+    if own:
+        cap.release()
+    if not ok:
+        sys.exit(f"local camera {index} returned no frame")
+    return frame
+
+
+def cmd_webcams(cfg, args):
+    """List local cameras (index, resolution) and save a thumbnail of each to runs/webcams/."""
+    out = Path("runs/webcams")
+    out.mkdir(parents=True, exist_ok=True)
+    for i in range(6):
+        cap = cv2.VideoCapture(i)
+        if not cap.isOpened():
+            continue
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 3840)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 2160)
+        ok, frame = cap.read()
+        cap.release()
+        if ok:
+            cv2.imwrite(str(out / f"cam{i}.jpg"), frame)
+            print(f"index {i}: {frame.shape[1]}x{frame.shape[0]}  -> {out}/cam{i}.jpg")
+    print("use the index of the phone with: vision --webcam N  /  calibrate-view --webcam N")
+
+
+def _grab_view_frame(cfg, args):
+    """Frame for calibrate-view: --webcam, --images, or the configured Viam camera."""
+    if getattr(args, "webcam", None) is not None:
+        return _webcam_frame(args.webcam)
+    if getattr(args, "images", None):
+        from .vision import FileCamera
+
+        return FileCamera(args.images).capture()
+    from .hardware.viam_robot import ViamConnection, ViamRobot
+
+    conn = ViamConnection()
+    try:
+        return ViamRobot(conn, **cfg["robot"]).capture()
+    finally:
+        conn.close()
+
+
+def cmd_calibrate_view(cfg, args):
+    """Click the 4 corners of the open spread on a fixed camera's image -> vision.book_corners."""
+    import numpy as np
+
+    frame = _grab_view_frame(cfg, args)
+    pts: list[list[int]] = []
+    labels = ["TOP-LEFT", "TOP-RIGHT", "BOTTOM-RIGHT", "BOTTOM-LEFT"]
+    view = frame.copy()
+
+    def on_click(event, x, y, *_):
+        if event == cv2.EVENT_LBUTTONDOWN and len(pts) < 4:
+            pts.append([x, y])
+            cv2.circle(view, (x, y), 8, (0, 0, 255), -1)
+
+    cv2.namedWindow("calibrate-view", cv2.WINDOW_NORMAL)
+    cv2.setMouseCallback("calibrate-view", on_click)
+    while len(pts) < 4:
+        shown = view.copy()
+        cv2.putText(shown, f"click the spread's {labels[len(pts)]} corner (q = quit)", (20, 50),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3)
+        cv2.imshow("calibrate-view", shown)
+        if cv2.waitKey(30) & 0xFF == ord("q"):
+            cv2.destroyAllWindows()
+            return
+    cv2.destroyAllWindows()
+    p = np.array(pts, float)
+    w = int(max(np.linalg.norm(p[1] - p[0]), np.linalg.norm(p[2] - p[3])))   # keep native resolution
+    h = int(max(np.linalg.norm(p[3] - p[0]), np.linalg.norm(p[2] - p[1])))
+    print("book_corners =", pts, " warp size =", [w, h])
+    _save_local({"vision": {"book_corners": pts, "fallback_warp_size": [w, h]}})
+
+
 def cmd_vision(cfg, args):
-    """Vision-only test bench on photos or the live wrist camera. Never moves the arm."""
+    """Vision-only test bench on photos, a local webcam/phone, or the live Viam camera. Never moves the arm."""
     import time
 
     from .hardware import BookFrame
@@ -238,6 +327,14 @@ def cmd_vision(cfg, args):
         cam = FileCamera(args.images)
         for path in cam.paths:
             bench.process(path.name, cv2.imread(str(path)), truth_dir=Path(args.images))
+    elif args.webcam is not None:
+        for i in range(args.frames):
+            frame = _webcam_frame(args.webcam)
+            cv2.imwrite(str(out / f"webcam{i:02d}.jpg"), frame)
+            bench.process(f"webcam{i:02d}.jpg", frame)
+            if i + 1 < args.frames:
+                input("Turn the page by hand (or leave it), then press Enter...") if args.manual \
+                    else time.sleep(args.interval)
     else:
         from .hardware.viam_robot import ViamConnection, ViamRobot
 
@@ -329,6 +426,11 @@ def main(argv=None):
     sp = sub.add_parser("save-pose")
     sp.add_argument("name")
     sub.add_parser("calibrate-book")
+    cv_ = sub.add_parser("calibrate-view", help="click the spread corners for a fixed (uncalibrated) camera")
+    cv_src = cv_.add_mutually_exclusive_group()
+    cv_src.add_argument("--webcam", type=int, metavar="N")
+    cv_src.add_argument("--images", help="use the first photo in this folder")
+    sub.add_parser("webcams", help="list local cameras on this computer")
     tm = sub.add_parser("calibrate-tool-mask", help="mask the pencil out of wrist-camera frames")
     tm.add_argument("--images", help="folder of wrist-camera frames from different views")
     tm.add_argument("--frames", type=int, default=6)
@@ -337,7 +439,9 @@ def main(argv=None):
     vb = sub.add_parser("vision", help="vision-only test bench (no arm motion)")
     src = vb.add_mutually_exclusive_group(required=True)
     src.add_argument("--images", help="folder of photos (+ optional <stem>.left.txt/.right.txt ground truth)")
-    src.add_argument("--live", action="store_true", help="Viam wrist camera at its current pose")
+    src.add_argument("--live", action="store_true", help="the configured Viam camera (robot.camera)")
+    src.add_argument("--webcam", type=int, metavar="N", help="local camera N on this computer, e.g. iPhone "
+                     "Continuity Camera (list with: bookworm webcams)")
     vb.add_argument("--frames", type=int, default=1)
     vb.add_argument("--interval", type=float, default=2.0)
     vb.add_argument("--manual", action="store_true", help="wait for Enter between live frames (hand-flip test)")
@@ -355,7 +459,8 @@ def main(argv=None):
     cfg = load_config(args.config or (LOCAL_CFG if LOCAL_CFG.exists() else None))
     handlers = {"read": cmd_read, "scan": cmd_scan, "check": cmd_check, "pencil": cmd_pencil,
                 "save-pose": cmd_save_pose, "calibrate-book": cmd_calibrate_book,
-                "calibrate-tool-mask": cmd_calibrate_tool_mask,
+                "calibrate-tool-mask": cmd_calibrate_tool_mask, "calibrate-view": cmd_calibrate_view,
+                "webcams": cmd_webcams,
                 "overlay": cmd_overlay, "vision": cmd_vision, "ocr": cmd_ocr, "flip": cmd_flip}
     handlers[args.cmd](cfg, args)
 

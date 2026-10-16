@@ -106,6 +106,7 @@ Vision is **plain Python on the laptop** (the Viam *client*), not a Viam module 
 python -m bookworm vision --images photos/                  # any photos of open books (phone is fine)
 python -m bookworm vision --live                            # one frame from the wrist camera, where the arm is now
 python -m bookworm vision --live --frames 10 --manual       # turn pages by hand between frames → tests flip checking
+python -m bookworm vision --webcam 1                        # a local camera, e.g. iPhone Continuity Camera (see docs/HARDWARE.md)
 ```
 
 Each run writes `runs/vision-<timestamp>/`, containing:

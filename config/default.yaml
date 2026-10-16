@@ -9,6 +9,10 @@ robot:
   arm: arm                  # uFactory arm component name in the Viam app
   gripper: gripper
   camera: cam               # RGB-D wrist camera; in the Viam frame system with the arm as parent
+  # Fixed overhead camera instead (e.g. a phone via a Mac sub-part, Viam `webcam` model)?
+  #   camera: phone-cam, camera_calibrated: false, then run `python -m bookworm calibrate-view`
+  #   once, and save the `overview` pose as an arm position that is OUT of the camera's view.
+  camera_calibrated: true   # true = intrinsics + frame system available -> exact page geometry
   # Distance from the arm flange (what Viam's arm pose refers to) to the eraser tip,
   # along the tool axis. Measure with the pencil in its 3D-printed holder.
   tool_length_mm: 190

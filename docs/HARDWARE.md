@@ -36,3 +36,32 @@ Book coordinates come from `calibrate-book`: you touch the eraser to the bottom 
 | Colour of anything visible to the camera | **bright matte green** (or tell vision the HSV range); matte, not glossy | vision masks this colour out automatically (`vision.clamp_color_hsv`); gloss causes glare |
 
 **Open design question for the page holders:** a passive holder has to stop the stacks from springing up but still let a leaf through. If the arm needs to nudge a holder during the flip, add those waypoints to `flip.sequence`. No code change is needed.
+
+## Option: phone as a fixed overhead camera (Mac sub-part)
+
+The RealSense has **fixed focus and 1280×720**. Small book text sits right at its limit: close up it's out of focus, further away the letters are too few pixels. A phone gives **autofocus + higher resolution**, and when mounted above the book it **never sees the pencil**.
+
+**1. Test quality first, without Viam** (2 minutes). Use iPhone Continuity Camera: iOS 16+, macOS 13+, same Apple ID, Wi-Fi and Bluetooth on, phone locked and held still near the Mac.
+```bash
+python -m bookworm webcams                      # find the phone's index; thumbnails in runs/webcams/
+python -m bookworm vision --webcam N            # compare words/conf with the wrist camera
+```
+macOS asks for camera permission the first time (System Settings → Privacy & Security → Camera → allow your terminal / VS Code).
+
+**2. Put it in Viam as a sub-part of the machine:**
+1. app.viam.com → the machine → **CONFIGURE** → **+** → **Sub-part**, named for example `shrav-mac`.
+2. Install and start `viam-server` on the Mac using the setup instructions the app shows for the sub-part (Homebrew `viam-server`, run with the downloaded config). Allow it camera access.
+3. On the sub-part, add a **camera** component, model **`webcam`**. Pick the iPhone as the video device and name it `phone-cam`.
+4. `python -m bookworm check` should now list `phone-cam`.
+
+**3. Point Bookworm at it** in `config/local.yaml`:
+```yaml
+robot: {camera: phone-cam, camera_calibrated: false}
+```
+Then:
+- `python -m bookworm calibrate-view`: click the spread's four corners once. The phone and book must not move after this.
+- `python -m bookworm save-pose overview`: an arm pose **out of the phone's view** (the arm parks there for each capture).
+
+**Mounting:** directly above the book, about 30–40 cm up, outside the arm's reach (tripod or desk-lamp arm with a phone clamp). Ask Teammate C to add it as an obstacle in Viam so motion planning avoids it.
+
+**Trade-off:** with an uncalibrated fixed camera, vision can't aim the eraser at a detected corner, so the flip uses the calibrated corner from `calibrate-book`. Everything else works the same: OCR, flip checking, scan storage, reading.
