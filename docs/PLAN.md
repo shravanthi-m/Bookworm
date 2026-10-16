@@ -1,77 +1,66 @@
 # Bookworm — Hackathon Sprint Plan
 
-Sprints are time-boxed blocks (about 3–4 h each) for a roughly 24–36 h hackathon. Squeeze or stretch them to fit the real schedule. Each sprint ends with a **demoable checkpoint**. If a checkpoint slips, cut scope from the "stretch" items. Don't push back the next sprint.
+Sprints are time-boxed blocks (about 3–4 h) for a roughly 24–36 h hackathon. Each ends with a **demoable checkpoint**. If one slips, cut stretch items. Don't push back the next sprint. Who does what: [DIVISION.md](DIVISION.md). Hardware details: [HARDWARE.md](HARDWARE.md).
 
-## Roles
-
-| Role | Owns | Lives in |
-|------|------|----------|
-| **Vision** | camera → page images → text → flip verification | `bookworm/vision/` |
-| **Software / Viam** | Viam machine config, servo wiring, control loop, TTS, CLI | `bookworm/hardware/`, `controller.py`, `speech/` |
-| **Mechanical (3D print)** | finger clamps, eraser arm, camera mount | CAD files; contract in [HARDWARE_INTERFACE.md](HARDWARE_INTERFACE.md) |
-
-Vision and software can work in parallel from the start. `--images` and `--mock` let you run the whole pipeline without the rig.
-
----
+Owners: **S** = Shrav (vision), **B** = CAD + motion, **C** = platform + modes.
 
 ## Sprint 0 — Setup (≈1 h, everyone)
-- [ ] Clone the repo, create a venv, `pip install -r requirements.txt`, install Tesseract.
-- [ ] Create the machine in the Viam app; install `viam-server` on the Pi.
-- [ ] Copy `.env.example` → `.env` and paste in the API key. **Never commit `.env`.**
-- [ ] Agree on Viam component names (`cam`, `clamp-left`, `clamp-right`, `eraser-lift`, `flip-arm`).
-- [ ] `pytest` passes on every laptop.
+- [ ] Clone, venv, `pip install -r requirements.txt`, install Tesseract. `pytest` is green.
+- [ ] `.env` with the Viam API key on every laptop (**never commit it**).
+- [ ] **C:** `python -m bookworm check` lists the arm, gripper and wrist camera, and prints the intrinsics and camera pose.
+- [ ] **B:** start the pencil holder and cradle CAD. Print a first pencil holder ASAP.
 
-**Checkpoint:** `python -m bookworm check` lists every component and saves `check_frame.jpg`.
+**Checkpoint:** everyone gets a `runs/check_frame.jpg` from the wrist camera.
 
-## Sprint 1 — See the book (Vision)
-- [ ] Fix the camera mount (temporary is fine). Take 20+ photos of real spreads under the venue's lighting. Save them to a shared folder.
-- [ ] `python -m bookworm calibrate` → book corners land in `config/local.yaml`.
-- [ ] `python -m bookworm ocr photo.jpg` → check `runs/debug/left.png` and `right.png` are cleanly split and binarised.
-- [ ] Tune `min_sharpness`, the adaptive threshold, and the gutter search band.
+## Sprint 1 — Calibrate the world
+- [ ] **B:** the pencil goes in its holder (`bookworm pencil`); measure `tool_length_mm`; the book sits in the (temporary) cradle.
+- [ ] **B:** `bookworm calibrate-book` (touch 3 points).
+- [ ] **C:** save the poses `home`, `overview`, `scan_left`, `scan_right` (`bookworm save-pose`).
+- [ ] **S:** `bookworm overlay overview` → the outline matches the pages. If not, debug the camera frame convention or calibration (V1).
+- [ ] **S:** collect 30+ captures of real spreads from each pose for offline vision work.
 
-**In parallel (Software):** wire the servos in Viam and check each one moves from the Viam app's CONTROL tab. Then run `python -m bookworm flip --mock`.
+**Checkpoint:** the overlay is accurate, and the eraser goes to a requested book coordinate within 3 mm.
 
-**Checkpoint:** readable OCR text from a real photo of the target book.
+## Sprint 2 — See and read (no flipping)
+- [ ] **S:** page warp, spine split, holder masking, OCR tuning, page numbers (V2–V5) on the saved captures.
+- [ ] **C:** read-aloud mode and voice on one spread; scan mode writes pages + PDF from `--images`.
+- [ ] **B:** first flip attempts: `bookworm flip` with a single press-and-drag. Observe how the leaf buckles.
 
-## Sprint 2 — Read aloud end to end, no flipping
-- [ ] TTS works on the demo machine (`speech.engine: pyttsx3`).
-- [ ] Mask the clamps: measure the finger rectangles (`clamp_masks`) **or** use the marker colour (`clamp_color_hsv`).
-- [ ] Check page-number extraction on 20 photos. Record the hit rate in the README's "Results" section.
-- [ ] `python -m bookworm run --images photos/ --mock` reads the whole folder aloud.
+**Checkpoint:** the robot reads one live spread aloud **and** scans one spread to PNG/PDF.
 
-**Checkpoint:** the robot reads one spread aloud from the live Viam camera.
+## Sprint 3 — Flip the page
+- [ ] **B:** tune the `flip.sequence` waypoints with `bookworm flip --times 10` and log the success rate (M5).
+- [ ] **B:** printed page holders mounted and the cradle finalised (M2, M3).
+- [ ] **S:** corner detection feeding the flip (V6); compare it with the calibrated corner.
+- [ ] **C:** Ctrl+C sends the arm home safely; reconnect handling (P5).
 
-## Sprint 3 — Flip the page (Software + Mechanical)
-- [ ] Mount the printed clamps and the eraser arm. Tune `hardware.angles` until the clamps hold and release cleanly.
-- [ ] Tune `flip_sequence` in YAML with `python -m bookworm flip --times 10`. Log the success rate.
-- [ ] Find what goes wrong: double pages, page doesn't lift, page falls back. Adjust drag angle, waits, and eraser pressure (`lift_down`).
+**Checkpoint:** 8 of 10 single-leaf flips succeed.
 
-**Checkpoint:** 8 of 10 flips succeed on their own.
+## Sprint 4 — Close the loop, both modes
+- [ ] **All:** `bookworm read` runs read → flip → verify → read on the rig.
+- [ ] **S:** tune flip verification on real flip / no-flip / double-flip captures (V7).
+- [ ] **C:** `bookworm scan` over 10 spreads → searchable PDF (P4).
+- [ ] **B:** stack-height compensation over a longer run (M6).
 
-## Sprint 4 — Close the loop
-- [ ] Full `python -m bookworm run` on the rig: read → flip → verify → read.
-- [ ] Check verification on real failures: a stuck page → retry; a double flip → announced.
-- [ ] Tune `verify.change_threshold` using saved `runs/` images (flip vs. no-flip pairs).
-- [ ] End-of-book detection on blank pages.
-
-**Checkpoint:** reads 5 consecutive spreads hands-off.
+**Checkpoint:** reads 5 spreads hands-off, and scans 10 spreads to a PDF.
 
 ## Sprint 5 — Demo polish
-- [ ] Run a 10-spread rehearsal and fix the top failure.
-- [ ] Prepare a backup demo: `--images` mode with recorded photos in case the rig fails on stage.
-- [ ] Update the README with results, photos, and a video.
-- [ ] Stretch: a "Start/Stop" button, a Viam data-capture dashboard, or speaking while the next flip runs (thread the TTS).
+- [ ] 10-spread rehearsal of each mode; fix the top failure.
+- [ ] **C:** backup demo with `--images` and recorded photos; README results; video.
+- [ ] **S (stretch):** curl dewarping for scan quality (V8).
+- [ ] Stretch: a pause/resume voice command, or a kid-friendly "point at a word" interaction.
 
-**Checkpoint:** a demo-ready run plus the backup.
+**Checkpoint:** demo-ready, with a backup.
 
 ---
 
 ## Risks & mitigations
 | Risk | Mitigation |
 |------|------------|
-| Glare or uneven lighting ruins OCR | Diffuse light (paper over an LED), angle the camera off-axis, CLAHE + adaptive threshold already in the pipeline |
-| Clamps hide text | Narrow fingers near the page edge, a marker colour for auto-masking, and `clamp_masks` |
-| Eraser lifts 2+ pages | Lighter `lift_down` pressure, a shorter drag; the verifier announces multi-flips |
-| Page curl near the spine distorts OCR | Hold the book open flat (clamps), keep the camera high, try `ocr.psm: 6` |
-| Venue Wi-Fi drops the Viam connection | Run the client on the same LAN as the Pi; keep the `--images` backup demo |
-| No page numbers (front matter) | The verifier falls back to image difference (`UNKNOWN` = assume OK) |
+| The eraser tears or lifts several leaves | compliant pencil holder, gentle press depth, stack-height compensation; the verifier announces multi-flips |
+| The book shifts between flips | cradle with stops; vision corner refinement; re-run `calibrate-book` if it's bumped |
+| Wrong camera-frame convention or calibration | check with `overlay` in Sprint 1 before building on it |
+| Glare under venue lights | matte prints, angle capture poses slightly off-normal, diffuse light |
+| Page holders hide text | narrow green fingers at the margins, colour masking |
+| Venue Wi-Fi drops the Viam connection | run the client on the same LAN as the machine; `--images` backup demo |
+| No page numbers (front matter) | the verifier falls back to image difference |

@@ -1,10 +1,19 @@
 """Command line entry point:  python -m bookworm <command> [options]
 
-    check                  connect to Viam, list components, grab a test frame
-    run                    read the book (Ctrl+C to stop)
-    ocr IMAGE              run the vision pipeline on one photo, print text, save debug images
-    flip [--times N]       exercise the flip sequence only (hardware tuning)
-    calibrate              click the 4 book corners on a live frame; saves config/local.yaml
+Modes
+    read                   read the book aloud, turning pages (Ctrl+C to stop)
+    scan --out DIR         non-destructive scan: page images + text + PDF
+
+Setup / calibration (writes config/local.yaml)
+    check                  connect to Viam, list components, read arm pose + camera calibration
+    pencil                 open gripper, insert pencil, grab
+    save-pose NAME         store the arm's current pose (home, overview, scan_left, scan_right)
+    calibrate-book         touch the eraser to 3 book points to define the book frame
+    overlay POSE           move to POSE, draw the projected book outline -> runs/overlay.jpg
+
+Development
+    ocr IMAGE              vision pipeline on one photo; debug images in runs/debug/
+    flip [--times N]       run the flip motion only (tuning)
 """
 from __future__ import annotations
 
@@ -15,68 +24,174 @@ from pathlib import Path
 
 import cv2
 
-from .config import load_config, save_config
+import yaml
+
+from .config import _merge, load_config
 
 LOCAL_CFG = Path(__file__).resolve().parent.parent / "config" / "local.yaml"
 
 
-def _default_cfg_path():
-    return LOCAL_CFG if LOCAL_CFG.exists() else None
+def _save_local(updates: dict):
+    """Merge only the calibrated keys into config/local.yaml (keeps other local overrides)."""
+    local = yaml.safe_load(LOCAL_CFG.read_text()) if LOCAL_CFG.exists() else {}
+    LOCAL_CFG.write_text(yaml.safe_dump(_merge(local or {}, updates), sort_keys=False))
+    print("saved to", LOCAL_CFG)
 
 
-def cmd_check(cfg, args):
-    from .hardware.viam_link import ViamCamera, ViamConnection
-
-    conn = ViamConnection()
-    try:
-        names = conn.resource_names()
-        print("Connected to", conn.address)
-        print("Resources:", ", ".join(sorted(names)))
-        wanted = list(cfg["hardware"]["components"].values()) + [cfg["camera"]["viam_name"]]
-        missing = [n for n in wanted if n not in names]
-        print("Missing (rename in Viam app or config):", missing or "none")
-        if cfg["camera"]["viam_name"] in names:
-            frame = ViamCamera(conn, cfg["camera"]["viam_name"]).capture()
-            cv2.imwrite("check_frame.jpg", frame)
-            print("Saved check_frame.jpg", frame.shape)
-    finally:
-        conn.close()
-
-
-def cmd_run(cfg, args):
-    from .controller import BookReader
-    from .rig import build_rig
-    from .speech import make_speaker
+# ---- modes -------------------------------------------------------------------
+def _run_mode(cfg, args, mode, handler_factory):
+    from .rig import build_robot
+    from .session import BookSession
     from .vision import TesseractOcr
 
-    if args.quiet:
-        cfg["speech"]["engine"] = "print"
-    camera, act, close = build_rig(cfg, images_dir=args.images, mock=args.mock or bool(args.images))
+    robot, close = build_robot(cfg, images_dir=args.images, mock=args.mock)
     try:
-        reader = BookReader(camera, act, TesseractOcr(**cfg["ocr"]), make_speaker(cfg["speech"]), cfg)
-        print(reader.run(max_spreads=args.max_spreads))
+        session = BookSession(robot, TesseractOcr(**cfg["ocr"]), handler_factory(), cfg, mode)
+        print(session.run(max_spreads=args.max_spreads))
     except KeyboardInterrupt:
         print("\ninterrupted")
     finally:
         close()
 
 
+def cmd_read(cfg, args):
+    from .modes import ReadAloud
+    from .speech import make_speaker
+
+    if args.quiet:
+        cfg["speech"]["engine"] = "print"
+    _run_mode(cfg, args, "read", lambda: ReadAloud(make_speaker(cfg["speech"]), cfg))
+
+
+def cmd_scan(cfg, args):
+    import time
+
+    from .modes import Scanner
+
+    out = args.out or f"scans/{time.strftime('%Y%m%d-%H%M%S')}"
+    _run_mode(cfg, args, "scan", lambda: Scanner(out, cfg))
+
+
+# ---- setup / calibration ------------------------------------------------------
+def cmd_check(cfg, args):
+    import numpy as np
+
+    from .hardware.viam_robot import ViamConnection, ViamRobot
+
+    conn = ViamConnection()
+    try:
+        names = conn.resource_names()
+        print("Connected to", conn.address)
+        print("Resources:", ", ".join(sorted(set(names))))
+        r = cfg["robot"]
+        missing = [n for n in (r["arm"], r["gripper"], r["camera"]) if n not in names]
+        if missing:
+            print("MISSING:", missing, "-> set robot.arm/gripper/camera in config/local.yaml")
+            return
+        robot = ViamRobot(conn, **r)
+        print("Arm flange pose:", {k: round(v, 1) for k, v in robot.end_pose().items()})
+        frame = robot.capture()
+        Path("runs").mkdir(exist_ok=True)
+        cv2.imwrite("runs/check_frame.jpg", frame)
+        print("Saved runs/check_frame.jpg", frame.shape)
+        try:
+            g = robot.camera_geometry()
+            np.set_printoptions(precision=2, suppress=True)
+            print("Intrinsics K:\n", g.K, "\nDistortion:", g.dist)
+            print("Camera pose in world:\n", g.T_world_cam)
+        except Exception as e:  # noqa: BLE001
+            print("Camera geometry unavailable:", e)
+    finally:
+        conn.close()
+
+
+def cmd_pencil(cfg, args):
+    from .rig import build_robot
+
+    robot, close = build_robot(cfg)
+    try:
+        robot.gripper("open")
+        input("Gripper open. Insert the pencil (eraser down) in its holder, then press Enter...")
+        robot.gripper("grab")
+        print("Grabbed.")
+    finally:
+        close()
+
+
+def cmd_save_pose(cfg, args):
+    from .rig import build_robot
+
+    robot, close = build_robot(cfg)
+    try:
+        pose = {k: round(float(v), 2) for k, v in robot.end_pose().items()}
+    finally:
+        close()
+    print(args.name, "=", pose)
+    _save_local({"poses": {args.name: pose}})
+
+
+def cmd_calibrate_book(cfg, args):
+    from .hardware import flange_to_tip
+    from .rig import build_robot
+
+    robot, close = build_robot(cfg)
+    prompts = {
+        "spine_bottom": "bottom end of the SPINE",
+        "spine_top": "top end of the SPINE",
+        "right_corner": "BOTTOM-OUTER corner of the RIGHT page",
+    }
+    points = {}
+    try:
+        for key, what in prompts.items():
+            input(f"Jog the arm so the eraser tip just touches the {what}, then press Enter...")
+            points[key] = [round(v, 2) for v in flange_to_tip(robot.end_pose(), cfg["robot"])]
+            print(f"  {key} = {points[key]}")
+    finally:
+        close()
+    _save_local({"book": points})
+
+
+def cmd_overlay(cfg, args):
+    from .hardware import BookFrame, page_quad
+    from .rig import build_robot
+    from .vision import book_quad_pixels
+
+    book = BookFrame.from_config(cfg["book"])
+    if book is None:
+        sys.exit("run calibrate-book first")
+    robot, close = build_robot(cfg)
+    try:
+        if cfg["poses"].get(args.pose):
+            robot.move_to(cfg["poses"][args.pose])
+        frame, geom = robot.capture(), robot.camera_geometry()
+    finally:
+        close()
+    b = cfg["book"]
+    for region, color in (("left", (255, 0, 0)), ("right", (0, 0, 255))):
+        quad = book_quad_pixels(book, geom, page_quad(region, b["page_width_mm"], b["page_height_mm"]))
+        cv2.polylines(frame, [quad.astype(int)], True, color, 3)
+    Path("runs").mkdir(exist_ok=True)
+    cv2.imwrite("runs/overlay.jpg", frame)
+    print("saved runs/overlay.jpg — blue/red outlines should sit exactly on the left/right pages")
+
+
+# ---- development --------------------------------------------------------------
 def cmd_ocr(cfg, args):
-    from .vision import TesseractOcr, process_spread, sharpness
+    from .vision import TesseractOcr, process_shot, sharpness
 
     frame = cv2.imread(args.image)
     if frame is None:
         sys.exit(f"cannot read {args.image}")
-    out = process_spread(frame, cfg["vision"])
+    pages = process_shot(frame, "spread", cfg["vision"])
     ocr = TesseractOcr(**cfg["ocr"])
     debug = Path("runs/debug")
     debug.mkdir(parents=True, exist_ok=True)
     print(f"sharpness: {sharpness(frame):.1f}")
-    for name in ("spread", "left", "right"):
-        cv2.imwrite(str(debug / f"{name}.png"), out[name])
-    for side in ("left", "right"):
-        res = ocr.read(out[side])
-        pn = ocr.page_number(out[side], cfg["vision"]["page_number_region"])
+    for side, page in pages.items():
+        cv2.imwrite(str(debug / f"{side}_color.png"), page.color)
+        cv2.imwrite(str(debug / f"{side}_binary.png"), page.binary)
+        res = ocr.read(page.binary)
+        pn = ocr.page_number(page.binary, cfg["vision"]["page_number_region"])
         print(f"\n=== {side}: page {pn}, conf {res.mean_conf:.0f}, {res.word_count} words ===\n{res.text}")
     print(f"\ndebug images in {debug}/")
 
@@ -84,80 +199,64 @@ def cmd_ocr(cfg, args):
 def cmd_flip(cfg, args):
     import time
 
-    from .hardware import run_sequence
-    from .rig import build_rig
+    from .hardware import BookFrame, run_flip
+    from .rig import build_robot
 
-    camera, act, close = build_rig(cfg, mock=args.mock)
+    book = BookFrame.from_config(cfg["book"])
+    if book is None and not args.mock:
+        sys.exit("run calibrate-book first")
+    robot, close = build_robot(cfg, mock=args.mock)
+    if args.mock:
+        robot.verbose = True
     try:
-        act.home()
         for i in range(args.times):
             print(f"flip {i + 1}/{args.times}")
-            run_sequence(act, cfg["flip_sequence"])
+            run_flip(robot, book or BookFrame.identity(), cfg, flip_index=i)
+            if cfg["poses"].get("home"):
+                robot.move_to(cfg["poses"]["home"])
             time.sleep(args.pause)
     finally:
         close()
 
 
-def cmd_calibrate(cfg, args):
-    from .rig import build_rig
-
-    camera, act, close = build_rig(cfg, images_dir=args.images, mock=True)
-    try:
-        frame = camera.capture()
-    finally:
-        close()
-    pts: list[list[int]] = []
-    labels = ["top-left", "top-right", "bottom-right", "bottom-left"]
-    view = frame.copy()
-
-    def on_click(event, x, y, *_):
-        if event == cv2.EVENT_LBUTTONDOWN and len(pts) < 4:
-            pts.append([x, y])
-            cv2.circle(view, (x, y), 8, (0, 0, 255), -1)
-
-    cv2.namedWindow("calibrate", cv2.WINDOW_NORMAL)
-    cv2.setMouseCallback("calibrate", on_click)
-    while len(pts) < 4:
-        shown = view.copy()
-        cv2.putText(shown, f"click book {labels[len(pts)]} corner (q to quit)", (20, 40),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)
-        cv2.imshow("calibrate", shown)
-        if cv2.waitKey(30) & 0xFF == ord("q"):
-            return
-    cv2.destroyAllWindows()
-    cfg["vision"]["book_corners"] = pts
-    save_config(cfg, LOCAL_CFG)
-    print("saved corners", pts, "to", LOCAL_CFG)
-
-
 def main(argv=None):
-    p = argparse.ArgumentParser(prog="bookworm")
-    p.add_argument("--config", default=None, help="YAML overriding config/default.yaml "
-                   "(defaults to config/local.yaml if present)")
+    p = argparse.ArgumentParser(prog="bookworm", description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--config", help="YAML overriding config/default.yaml (default: config/local.yaml if present)")
     p.add_argument("-v", "--verbose", action="store_true")
     sub = p.add_subparsers(dest="cmd", required=True)
 
+    for name in ("read", "scan"):
+        m = sub.add_parser(name)
+        m.add_argument("--images", help="folder of spread photos instead of the arm (no Viam)")
+        m.add_argument("--mock", action="store_true", help="fake robot, no Viam")
+        m.add_argument("--max-spreads", type=int)
+        if name == "read":
+            m.add_argument("--quiet", action="store_true", help="print text instead of speaking")
+        else:
+            m.add_argument("--out", help="output folder (default scans/<timestamp>)")
     sub.add_parser("check")
-    r = sub.add_parser("run")
-    r.add_argument("--images", help="folder of spread photos instead of a camera (implies --mock)")
-    r.add_argument("--mock", action="store_true", help="fake servos")
-    r.add_argument("--quiet", action="store_true", help="print text instead of speaking")
-    r.add_argument("--max-spreads", type=int)
+    sub.add_parser("pencil")
+    sp = sub.add_parser("save-pose")
+    sp.add_argument("name")
+    sub.add_parser("calibrate-book")
+    ov = sub.add_parser("overlay")
+    ov.add_argument("pose", nargs="?", default="overview")
     o = sub.add_parser("ocr")
     o.add_argument("image")
     f = sub.add_parser("flip")
     f.add_argument("--times", type=int, default=1)
     f.add_argument("--pause", type=float, default=2.0)
     f.add_argument("--mock", action="store_true")
-    c = sub.add_parser("calibrate")
-    c.add_argument("--images", help="calibrate on a saved photo folder instead of the camera")
 
     args = p.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
-    cfg = load_config(args.config or _default_cfg_path())
-    {"check": cmd_check, "run": cmd_run, "ocr": cmd_ocr, "flip": cmd_flip,
-     "calibrate": cmd_calibrate}[args.cmd](cfg, args)
+    cfg = load_config(args.config or (LOCAL_CFG if LOCAL_CFG.exists() else None))
+    handlers = {"read": cmd_read, "scan": cmd_scan, "check": cmd_check, "pencil": cmd_pencil,
+                "save-pose": cmd_save_pose, "calibrate-book": cmd_calibrate_book,
+                "overlay": cmd_overlay, "ocr": cmd_ocr, "flip": cmd_flip}
+    handlers[args.cmd](cfg, args)
 
 
 if __name__ == "__main__":

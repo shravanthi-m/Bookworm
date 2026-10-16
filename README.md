@@ -1,33 +1,44 @@
 # 📖 Bookworm
 
-**A robot that reads physical books aloud and turns the pages itself.**
+**A robot arm that turns real book pages with a pencil eraser. It can read the book aloud or scan it without damaging it.**
 
-An overhead camera photographs the open book. Computer vision splits and cleans each page, Tesseract OCR reads it, and text-to-speech reads it aloud. Then a pen-eraser arm turns the page, using friction to lift it, while 3D-printed finger clamps hold the book open. The robot checks that exactly one page turned before reading on. Built on [Viam](https://www.viam.com/).
+A uFactory arm, controlled through [Viam](https://www.viam.com/), holds a pencil in its gripper. Its calibrated wrist camera photographs each spread. Computer vision straightens and cleans the pages, and Tesseract OCR reads them. Then the arm presses the eraser onto the page, buckles the leaf, and carries it over the spine. Before going on, vision checks that exactly one page turned.
+
+## Two modes
+
+| Mode | Command | For | Output |
+|------|---------|-----|--------|
+| **Read aloud** | `python -m bookworm read` | reading to children, or anyone who can't hold or see a book | speech, page by page |
+| **Scan** | `python -m bookworm scan --out scans/mybook` | non-destructive digitisation: no cutting the spine, no flatbed | `pages/0001.png…`, `book.txt`, `book.pdf`, `manifest.json` |
+
+Both share one loop:
 
 ```
- ┌────────┐   ┌──────────────────────── vision ─────────────────────────┐   ┌──────┐
- │ camera │──▶│ warp to book → mask clamps → split at spine → binarise  │──▶│ OCR  │──▶ 🔊 speak
- └────────┘   └─────────────────────────────────────────────────────────┘   └──────┘
-      ▲                                                                         │
-      │        ┌──────── verify flip ────────┐       ┌──── flip (Viam servos) ──┴─┐
-      └────────│ page # +2? image changed?   │◀──────│ clamps · eraser lift · arm │
-               └─────────────────────────────┘       └────────────────────────────┘
+ move to capture pose ─▶ wrist camera ─▶ warp to page (camera geometry) ─▶ mask holders ─▶ OCR
+          ▲                                                                                 │
+          │                                                                  read aloud  OR  save scan
+          │                                                                                 │
+   verify flip ◀── capture next spread ◀── pencil-eraser flip (book-frame waypoints) ◀──────┘
+ (page # +2? image changed?)
 ```
+
+## Hardware
+
+Fixed setup, already configured in Viam: **uFactory arm + gripper + calibrated wrist camera**, plus a pencil (eraser down) in the gripper. 3D-printed parts: a compliant pencil holder, a book cradle, and passive page holders in matte green. There are no servos or microcontrollers. Details: [docs/HARDWARE.md](docs/HARDWARE.md).
 
 ## Repo layout
 
 ```
 bookworm/
-  vision/        camera.py · preprocess.py · ocr.py · verify.py   ← the vision pipeline
-  hardware/      base.py (interface + flip runner) · viam_link.py · mock.py
-  speech/        text-to-speech (pyttsx3, or print for quiet dev)
-  controller.py  main loop: capture → OCR → speak → flip → verify
-  rig.py         builds camera/servos from config
-  __main__.py    CLI
-config/default.yaml   every tunable: servo angles, flip motion, thresholds
-docs/PLAN.md          sprint plan, roles, risks
-docs/HARDWARE_INTERFACE.md   contract with the mechanical/3D-print side
-tests/                runs without hardware, Viam, or a camera
+  vision/       geometry.py (pixel↔world) · preprocess.py · page_detect.py · ocr.py · verify.py
+  hardware/     base.py (Robot interface) · viam_robot.py · book_frame.py · flip.py · mock.py
+  modes/        read_aloud.py · scan.py
+  speech/       text-to-speech
+  session.py    shared capture → OCR → handler → flip → verify loop
+  __main__.py   CLI
+config/default.yaml   every tunable: component names, poses, flip waypoints, thresholds
+docs/PLAN.md          sprint plan · docs/DIVISION.md who owns what · docs/HARDWARE.md setup + 3D prints
+tests/                run without the arm, Viam, or a camera
 ```
 
 ## Setup
@@ -36,83 +47,73 @@ tests/                runs without hardware, Viam, or a camera
 git clone https://github.com/shravanthi-m/Bookworm.git && cd Bookworm
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-brew install tesseract          # macOS   |  sudo apt install tesseract-ocr espeak  (Pi/Linux)
-cp .env.example .env            # then fill in your Viam keys (see below)
-pytest                          # should pass with no hardware attached
+brew install tesseract          # macOS   |  sudo apt install tesseract-ocr espeak  (Linux)
+cp .env.example .env            # then paste in the Viam API key (below)
+pytest                          # should pass with no hardware
 ```
 
-### Viam credentials
+### Viam API key
 
-1. In [app.viam.com](https://app.viam.com), open the machine → **CONNECT** tab → **API keys**.
-2. Put the values in `.env`:
-   ```
-   VIAM_ADDRESS=your-machine-main.xxxxxxxx.viam.cloud
-   VIAM_API_KEY_ID=...
-   VIAM_API_KEY=...
-   ```
-3. `.env` is git-ignored. **Never commit keys.** If a key leaks, delete it in the Viam app and make a new one.
+1. In [app.viam.com](https://app.viam.com), open the machine → **CONNECT** → **API keys**.
+2. Fill in `.env`: `VIAM_ADDRESS`, `VIAM_API_KEY_ID`, `VIAM_API_KEY`.
+3. `.env` is git-ignored. **Never commit keys.** If one leaks, delete it in the Viam app and make a new one.
 
-### Viam machine config
+Component names default to `arm`, `gripper` and `wrist-cam`. If yours are different, override them in `config/local.yaml`:
 
-Add these components on the machine's **CONFIGURE** tab. The names must match `config/default.yaml → hardware.components` and `camera.viam_name`:
+```yaml
+robot: {arm: my-xarm, gripper: my-gripper, camera: my-cam}
+```
 
-| Name | Type | Notes |
-|------|------|-------|
-| `cam` | camera (`webcam`) | overhead, pointing straight down |
-| `clamp-left`, `clamp-right` | servo | finger clamps |
-| `eraser-lift` | servo | raises/lowers the pen eraser |
-| `flip-arm` | servo | swings the eraser across the book |
-
-Then run `python -m bookworm check`. It connects, lists the components, flags any missing names, and saves a test frame.
-
-## Usage
+## First-time calibration (with the book in its cradle)
 
 ```bash
-python -m bookworm check                         # test the Viam connection + camera
-python -m bookworm calibrate                     # click the 4 book corners → config/local.yaml
-python -m bookworm ocr photo.jpg                 # vision on one image; debug images in runs/debug/
-python -m bookworm flip --times 10               # tune the flip motion on the rig
-python -m bookworm run                           # read the book! (Ctrl+C to stop)
-
-# No hardware? Develop against photos with fake servos:
-python -m bookworm run --images photos/ --quiet
+python -m bookworm check                 # connection, components, intrinsics, camera pose
+python -m bookworm pencil                # open gripper → insert pencil → grab
+python -m bookworm calibrate-book        # touch eraser to spine bottom, spine top, right page corner
+python -m bookworm save-pose home        # jog the arm (Viam CONTROL tab / freedrive) to each pose first
+python -m bookworm save-pose overview    #   whole spread in view   (read mode)
+python -m bookworm save-pose scan_left   #   left page fills frame  (scan mode)
+python -m bookworm save-pose scan_right  #   right page fills frame (scan mode)
+python -m bookworm overlay overview      # runs/overlay.jpg — outline must sit on the pages
+python -m bookworm flip --times 5        # tune flip.sequence in config until flips are reliable
 ```
 
-Every run saves each captured spread and its OCR text to `runs/<timestamp>/`. Use these to tune the vision.
+Calibration is written to `config/local.yaml` (git-ignored, specific to your rig).
+
+## Development without the arm
+
+```bash
+python -m bookworm read --images photos/ --quiet     # replay spread photos, print instead of speak
+python -m bookworm scan --images photos/ --out scans/test
+python -m bookworm ocr photo.jpg                     # one image → text + runs/debug/*.png
+python -m bookworm flip --mock                       # print the flip waypoints
+```
+
+Every run saves its captures and OCR text to `runs/<timestamp>-<mode>/`. Use these as vision test data.
 
 ## How the vision works
 
 | Step | Code | Why |
 |------|------|-----|
-| Perspective warp to the calibrated corners | `preprocess.warp_to_book` | flattens a slightly angled camera view |
-| Sharpness gate (variance of the Laplacian) | `preprocess.sharpness` | re-captures if the page is still moving after a flip |
-| Clamp masking by colour and by rectangles | `mask_color`, `mask_rects` | clamp fingers would otherwise come out as junk characters |
-| Split at the spine (darkest column near the centre) | `find_gutter` | the gutter shadow is a strong, cheap cue |
-| CLAHE + adaptive threshold | `prepare_for_ocr` | handles uneven lighting and curl shadows |
-| Tesseract with word-confidence filtering | `ocr.TesseractOcr` | low-confidence fragments get dropped instead of spoken |
-| Text cleanup | `ocr.clean_text` | re-joins hyphenated words and drops page-number lines |
-| Flip verification | `verify.classify_flip` | page number +2 = OK, +0 = retry, >+2 = skipped pages; image difference as a fallback |
+| Pixel ↔ world from the wrist camera's intrinsics + Viam frame system | `vision/geometry.py` | the page outline is computed, not guessed, at any arm pose |
+| Perspective warp to the projected page quad at a set px/mm | `preprocess.process_shot` | upright pages; about 300 dpi in scan mode |
+| Sharpness gate after arm motion | `preprocess.sharpness` | waits out vibration |
+| Holder masking by colour | `mask_color` | green holders would otherwise show up as junk text |
+| Spine split at the darkest column | `find_gutter` | for single-shot spreads |
+| CLAHE + adaptive threshold → Tesseract with confidence filtering | `prepare_for_ocr`, `ocr.py` | uneven light; low-confidence fragments get dropped |
+| Right-page corner from the book outline, in book mm | `page_detect.locate_right_corner` | aims the eraser even if the book has shifted slightly |
+| Flip verification: page number +2 = OK, +0 = retry, >+2 = skipped pages, image difference as a fallback | `verify.classify_flip` | catches stuck and double flips |
 
-## Tuning cheat-sheet (`config/local.yaml`)
+## Team
 
-| Symptom | Knob |
-|---------|------|
-| OCR spells out the clamp as junk | `vision.clamp_masks`, `vision.clamp_color_hsv` |
-| Rejects sharp images as blurry | lower `vision.min_sharpness` |
-| Says "can't read" too often | lower `ocr.min_page_conf`, try `ocr.psm: 6` |
-| Retries a flip that worked | lower `verify.change_threshold` |
-| Lifts two pages at once | less pressure (`hardware.angles.lift_down`), a shorter drag in `flip_sequence` |
+| Area | Owner | Tasks |
+|------|-------|-------|
+| Vision | Shrav | [DIVISION.md § Shrav](docs/DIVISION.md#-shrav--vision) |
+| CAD + motion software | _Teammate B_ | [DIVISION.md § Teammate B](docs/DIVISION.md#-teammate-b--cad--motion-software) |
+| Platform, modes & demo | _Teammate C_ | [DIVISION.md § Teammate C](docs/DIVISION.md#-teammate-c--platform-modes--demo) |
 
-## Team & plan
-
-See **[docs/PLAN.md](docs/PLAN.md)** for the sprint plan and **[docs/HARDWARE_INTERFACE.md](docs/HARDWARE_INTERFACE.md)** for the mechanical contract.
-
-| Area | Owner |
-|------|-------|
-| Vision | _TBD_ |
-| Software / Viam integration | _TBD_ |
-| Mechanical / 3D printing | _TBD_ |
+Sprint plan: [docs/PLAN.md](docs/PLAN.md).
 
 ## Results
 
-_Fill in during Sprints 2–5: OCR accuracy, page-number hit rate, flip success rate, demo video._
+_Fill in during Sprints 2–5: OCR accuracy, page-number hit rate, flip success rate, scan samples, demo video._

@@ -27,7 +27,3 @@ def load_config(path: str | Path | None = None) -> dict:
             cfg = _merge(cfg, yaml.safe_load(f) or {})
     return cfg
 
-
-def save_config(cfg: dict, path: str | Path) -> None:
-    with open(path, "w") as f:
-        yaml.safe_dump(cfg, f, sort_keys=False)

@@ -1,48 +1,57 @@
-"""Hardware abstraction. The controller only talks to this interface, so the
-mechanism (clamps, eraser arm) can change without touching vision or control code."""
+"""Robot interface. Sessions and modes only talk to this, so Viam and the mock are swappable."""
 from __future__ import annotations
 
-import time
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
+
+import numpy as np
+
+POSE_KEYS = ("x", "y", "z", "o_x", "o_y", "o_z", "theta")
 
 
 class HardwareError(RuntimeError):
     pass
 
 
-class Actuators(ABC):
+@dataclass
+class CameraGeometry:
+    """Everything needed to map pixels <-> world for one captured frame."""
+    K: np.ndarray                 # 3x3 intrinsics, scaled to the captured image size
+    dist: np.ndarray | None       # distortion coefficients (OpenCV order) or None
+    T_world_cam: np.ndarray       # 4x4 camera pose in the world frame at capture time
+
+
+class Robot(ABC):
     @abstractmethod
-    def clamp(self, side: str, engaged: bool) -> None:
-        """side: 'left' | 'right'."""
+    def move_to(self, pose: dict) -> None:
+        """Move the arm flange to a world pose {x, y, z, o_x, o_y, o_z, theta} (mm, deg)."""
 
     @abstractmethod
-    def lift(self, down: bool) -> None:
-        """Lower the pen eraser onto the page (True) or raise it (False)."""
+    def end_pose(self) -> dict:
+        """Current flange pose in the world frame."""
 
     @abstractmethod
-    def arm(self, angle: float) -> None:
-        """Rotate the flipper arm. 0 = over right page, 180 = over left page."""
+    def gripper(self, action: str) -> None:
+        """'open' or 'grab'."""
 
     @abstractmethod
-    def home(self) -> None:
-        """Safe pose: eraser up, arm at 0, both clamps engaged."""
+    def capture(self) -> np.ndarray:
+        """BGR image from the wrist camera."""
+
+    def camera_geometry(self) -> CameraGeometry | None:
+        """Intrinsics + current camera pose, or None if unknown (mock / photos)."""
+        return None
 
     def close(self) -> None:
         pass
 
 
-def run_sequence(act: Actuators, steps: list[dict]) -> None:
-    """Execute a flip_sequence from config, e.g. [{'arm': {'angle': 10}}, {'wait': {'s': 0.3}}]."""
-    for step in steps:
-        (name, args), = step.items()
-        args = args or {}
-        if name == "clamp":
-            act.clamp(args["side"], bool(args["engaged"]))
-        elif name == "lift":
-            act.lift(bool(args["down"]))
-        elif name == "arm":
-            act.arm(float(args["angle"]))
-        elif name == "wait":
-            time.sleep(float(args["s"]))
-        else:
-            raise HardwareError(f"unknown flip step: {name}")
+def tip_to_flange(tip_xyz, rcfg: dict) -> dict:
+    """Flange pose that puts the eraser tip at ``tip_xyz`` with the tool pointing straight down."""
+    x, y, z = (float(v) for v in tip_xyz)
+    return {"x": x, "y": y, "z": z + rcfg["tool_length_mm"], **rcfg["tip_orientation"]}
+
+
+def flange_to_tip(pose: dict, rcfg: dict) -> list[float]:
+    """Inverse of tip_to_flange (assumes the tool points straight down)."""
+    return [pose["x"], pose["y"], pose["z"] - rcfg["tool_length_mm"]]

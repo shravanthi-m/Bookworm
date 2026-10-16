@@ -1,33 +1,40 @@
-"""Fake hardware for developing/testing software without the rig."""
+"""Fake robot for developing without the arm. Images come from a folder of photos."""
 from __future__ import annotations
 
-from .base import Actuators
+import numpy as np
+
+from .base import POSE_KEYS, Robot
 
 
-class MockActuators(Actuators):
-    def __init__(self, on_flip=None, verbose: bool = False):
-        self.log: list[tuple] = []
-        self.on_flip = on_flip      # e.g. FileCamera.advance, called when the arm sweeps left
+class MockRobot(Robot):
+    def __init__(self, camera=None, verbose: bool = False):
+        self.camera = camera          # anything with capture(); FileCamera also has advance()
         self.verbose = verbose
-        self._angle = 0.0
+        self.log: list[tuple] = []
+        self._pose = dict.fromkeys(POSE_KEYS, 0.0)
 
     def _record(self, *entry):
         self.log.append(entry)
         if self.verbose:
-            print("[mock hw]", *entry)
+            print("[mock robot]", *entry)
 
-    def clamp(self, side, engaged):
-        self._record("clamp", side, engaged)
+    def move_to(self, pose):
+        self._record("move", {k: round(float(pose[k]), 1) for k in ("x", "y", "z")})
+        self._pose = dict(pose)
 
-    def lift(self, down):
-        self._record("lift", down)
+    def end_pose(self):
+        return dict(self._pose)
 
-    def arm(self, angle):
-        self._record("arm", angle)
-        if self._angle < 90 <= angle and self.on_flip:
-            self.on_flip()
-        self._angle = angle
+    def gripper(self, action):
+        self._record("gripper", action)
 
-    def home(self):
-        self._record("home")
-        self._angle = 0.0
+    def capture(self):
+        if self.camera is None:
+            return np.full((1100, 1600, 3), 255, np.uint8)
+        return self.camera.capture()
+
+    def simulate_page_turn(self):
+        """Called by the session after a flip so photo playback moves to the next spread."""
+        self._record("page_turned")
+        if hasattr(self.camera, "advance"):
+            self.camera.advance()

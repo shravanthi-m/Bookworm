@@ -1,50 +1,31 @@
-"""Build camera / actuators from config."""
+"""Build the robot from config: the Viam machine, or a mock that replays photos."""
 from __future__ import annotations
 
-from .hardware import MockActuators
+from .hardware import MockRobot
 
 
-def build_rig(cfg: dict, images_dir: str | None = None, mock: bool = False):
-    """Returns (camera, actuators, close_fn).
-
-    ``images_dir`` replays a folder of photos instead of a live camera;
-    ``mock`` fakes the servos. Either way, Viam is only contacted if needed.
-    """
-    viam_cam = not images_dir and cfg["camera"]["source"] == "viam"
-    viam_hw = not mock and cfg["hardware"]["backend"] == "viam"
-    conn = None
-    if viam_cam or viam_hw:
-        from .hardware.viam_link import ViamConnection
-
-        conn = ViamConnection()
-
-    if images_dir:
+def build_robot(cfg: dict, images_dir: str | None = None, mock: bool = False):
+    """Returns (robot, close_fn). ``images_dir`` or ``mock`` => no Viam connection."""
+    if images_dir or mock or cfg["robot"]["backend"] != "viam":
         from .vision import FileCamera
 
-        camera = FileCamera(images_dir)
-    elif viam_cam:
-        from .hardware.viam_link import ViamCamera
+        cfg["robot"]["backend"] = "mock"
+        robot = MockRobot(FileCamera(images_dir) if images_dir else None, verbose=False)
+        return robot, robot.close
 
-        camera = ViamCamera(conn, cfg["camera"]["viam_name"])
-    else:
-        from .vision import Camera
+    from .hardware.viam_robot import ViamConnection, ViamRobot
 
-        c = cfg["camera"]
-        camera = Camera(c["index"], c["width"], c["height"], c["warmup_frames"])
-
-    if viam_hw:
-        from .hardware.viam_link import ViamActuators
-
-        act = ViamActuators(conn, **cfg["hardware"])
-    else:
-        act = MockActuators(on_flip=getattr(camera, "advance", None), verbose=True)
+    conn = ViamConnection()
+    try:
+        robot = ViamRobot(conn, **cfg["robot"])
+    except Exception:
+        conn.close()
+        raise
 
     def close():
         try:
-            act.close()
-            camera.close()
+            robot.close()
         finally:
-            if conn:
-                conn.close()
+            conn.close()
 
-    return camera, act, close
+    return robot, close

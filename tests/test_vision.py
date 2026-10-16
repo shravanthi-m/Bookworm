@@ -4,9 +4,14 @@ import cv2
 import numpy as np
 import pytest
 
-from bookworm.vision import FlipOutcome, classify_flip, image_difference, sharpness
+from bookworm.hardware import BookFrame, CameraGeometry, page_quad
+from bookworm.vision import (FlipOutcome, book_quad_pixels, classify_flip, find_paper_corners,
+                             image_difference, locate_right_corner, pixel_to_plane, process_shot,
+                             sharpness, world_to_pixel)
 from bookworm.vision.ocr import clean_text, parse_page_number
-from bookworm.vision.preprocess import find_gutter, mask_color, mask_rects, process_spread
+from bookworm.vision.preprocess import find_gutter, mask_color, mask_rects
+
+VCFG = {"book_corners": None, "fallback_warp_size": [1600, 1100], "clamp_masks": [], "clamp_color_hsv": None}
 
 
 def make_spread(left_words="hello world", right_words="second page", page=12, w=1600, h=1100):
@@ -21,9 +26,18 @@ def make_spread(left_words="hello world", right_words="second page", page=12, w=
     return img
 
 
+def overhead_camera(height=400.0, f=1000.0, size=(1600, 1200)):
+    """Camera looking straight down from (0, 0, height); image x = world x, image y = -world y."""
+    K = np.array([[f, 0, size[0] / 2], [0, f, size[1] / 2], [0, 0, 1]])
+    T = np.eye(4)
+    T[:3, :3] = np.diag([1.0, -1.0, -1.0])   # cam z (forward) points world -z (down)
+    T[:3, 3] = [0, 0, height]
+    return CameraGeometry(K, None, T)
+
+
+# ---- preprocessing ------------------------------------------------------------
 def test_gutter_found_near_center():
-    img = make_spread()
-    assert abs(find_gutter(img) - 800) < 15
+    assert abs(find_gutter(make_spread()) - 800) < 15
 
 
 def test_sharpness_drops_when_blurred():
@@ -32,29 +46,64 @@ def test_sharpness_drops_when_blurred():
 
 
 def test_mask_rects_whites_out_region():
-    img = np.zeros((100, 100), np.uint8)
-    out = mask_rects(img, [[0, 0, 0.5, 0.5]])
+    out = mask_rects(np.zeros((100, 100), np.uint8), [[0, 0, 0.5, 0.5]])
     assert out[:50, :50].min() == 255 and out[60:, 60:].max() == 0
 
 
-def test_mask_color_removes_green_clamp():
+def test_mask_color_removes_green_holder():
     img = make_spread()
-    cv2.rectangle(img, (0, 400), (90, 600), (0, 200, 0), -1)  # green clamp finger
-    out = mask_color(img, [[40, 80, 60], [85, 255, 255]])
-    assert out[500, 45].tolist() == [255, 255, 255]
+    cv2.rectangle(img, (0, 400), (90, 600), (0, 200, 0), -1)
+    assert mask_color(img, [[40, 80, 60], [85, 255, 255]])[500, 45].tolist() == [255, 255, 255]
 
 
-def test_process_spread_outputs_binary_pages():
-    out = process_spread(make_spread(), {"book_corners": None, "warp_size": [1600, 1100],
-                                         "clamp_masks": [], "clamp_color_hsv": None})
-    assert set(np.unique(out["left"])) <= {0, 255}
-    assert out["left"].shape[0] == 1100
+def test_process_shot_spread_and_single_page():
+    pages = process_shot(make_spread(), "spread", VCFG)
+    assert set(pages) == {"left", "right"}
+    assert set(np.unique(pages["left"].binary)) <= {0, 255}
+    assert pages["left"].color.ndim == 3
+    # fallback (no geometry) for a single-page region still splits the spread
+    assert set(process_shot(make_spread(), "right", VCFG)) == {"right"}
 
 
+def test_process_shot_with_projected_quad():
+    img = make_spread()
+    quad = np.array([[800, 0], [1599, 0], [1599, 1099], [800, 1099]], float)
+    pages = process_shot(img, "right", VCFG, quad, (700, 1000))
+    assert pages["right"].color.shape[:2] == (1000, 700)
+
+
+# ---- geometry -----------------------------------------------------------------
+def test_pixel_plane_round_trip():
+    g = overhead_camera()
+    world = np.array([[50.0, -30.0, 0.0], [-120.0, 80.0, 0.0]])
+    px = world_to_pixel(world, g.K, g.T_world_cam)
+    assert np.allclose(px[0], [800 + 125, 600 + 75])     # f * x / z
+    assert np.allclose(pixel_to_plane(px, g.K, g.T_world_cam, 0.0), world, atol=1e-6)
+
+
+def test_book_frame_axes():
+    book = BookFrame([100, 0, 5], [100, 200, 5], [250, 3, 8])   # spine along world y
+    assert np.allclose(book.to_world(140, 0, 0), [240, 0, 8])
+    assert np.allclose(book.from_world(book.to_world(-30, 50, 2)), [-30, 50, 2])
+
+
+def test_locate_right_corner_from_image():
+    g = overhead_camera(height=450)
+    book = BookFrame([0, 0, 0], [0, 1, 0], [1, 0, 0])
+    bcfg = {"page_width_mm": 140, "page_height_mm": 210}
+    img = np.full((1200, 1600, 3), 40, np.uint8)                 # dark table
+    true_quad = page_quad("spread", 140, 210) + [3, -4]          # book shifted 3 mm, -4 mm
+    px = book_quad_pixels(book, g, true_quad)
+    cv2.fillPoly(img, [px.astype(np.int32)], (240, 240, 240))
+    assert find_paper_corners(img) is not None
+    c = locate_right_corner(img, g, book, bcfg, search_mm=25)
+    assert c is not None and abs(c[0] - 143) < 2 and abs(c[1] + 4) < 2
+
+
+# ---- verification / text -------------------------------------------------------
 def test_image_difference():
     a, b = make_spread(page=10), make_spread("other text", "entirely new", page=12)
-    assert image_difference(a, a) < 0.01
-    assert image_difference(a, b) > image_difference(a, a)
+    assert image_difference(a, a) < 0.01 < image_difference(a, b)
 
 
 @pytest.mark.parametrize("before,after,expected", [
@@ -69,8 +118,7 @@ def test_classify_by_page_number(before, after, expected):
 def test_classify_without_page_numbers_uses_image():
     a = make_spread()
     assert classify_flip(a, a, None, None) == FlipOutcome.NO_FLIP
-    b = np.full_like(a, 30)
-    assert classify_flip(a, b, None, None) == FlipOutcome.UNKNOWN
+    assert classify_flip(a, np.full_like(a, 30), None, None) == FlipOutcome.UNKNOWN
 
 
 def test_clean_text():
@@ -83,8 +131,7 @@ def test_clean_text():
 def test_tesseract_end_to_end():
     from bookworm.vision import TesseractOcr
 
-    out = process_spread(make_spread(), {"book_corners": None, "warp_size": [1600, 1100],
-                                         "clamp_masks": [], "clamp_color_hsv": None})
+    pages = process_shot(make_spread(), "spread", VCFG)
     ocr = TesseractOcr()
-    assert "hello" in ocr.read(out["left"]).text.lower()
-    assert ocr.page_number(out["left"], 0.08) == 12
+    assert "hello" in ocr.read(pages["left"].binary).text.lower()
+    assert ocr.page_number(pages["left"].binary, 0.08) == 12

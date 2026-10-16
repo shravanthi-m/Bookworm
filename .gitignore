@@ -15,5 +15,6 @@ venv/
 
 # Local data / overrides
 runs/
+scans/
 config/local.yaml
 .DS_Store
