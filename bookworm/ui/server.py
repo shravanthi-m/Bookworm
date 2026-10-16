@@ -80,12 +80,13 @@ class Controller:
         while True:
             try:
                 f = rotate_frame(self.camera.capture(), self.cfg["vision"].get("rotate", 0))
-                small = cv2.resize(f, (960, int(960 * f.shape[0] / f.shape[1])))
+                view = f.copy()                                # full resolution: crisp on Retina screens
                 if self.cfg["vision"].get("auto_corners"):
-                    quad = find_book_quad(small)               # show what will be read
+                    scale = 960 / f.shape[1]                   # detect on a small copy (fast)
+                    quad = find_book_quad(cv2.resize(f, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA))
                     if quad is not None:
-                        cv2.polylines(small, [quad.astype("int32")], True, (80, 140, 110), 2)
-                ok, buf = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, 75])
+                        cv2.polylines(view, [(quad / scale).astype("int32")], True, (80, 140, 110), 3)
+                ok, buf = cv2.imencode(".jpg", view, [cv2.IMWRITE_JPEG_QUALITY, 90])
                 with self.lock:
                     self.frame, self.jpeg = f, buf.tobytes() if ok else self.jpeg
                 if self.state["status"].startswith(("Camera:", "Connecting")):
@@ -94,7 +95,7 @@ class Controller:
                 msg = str(e)
                 self.state["status"] = "Connecting to camera…" if "connecting" in msg else f"Camera: {msg}"
                 time.sleep(1)
-            time.sleep(0.15)
+            time.sleep(0.05)
 
     def _spread(self) -> Spread:
         time.sleep(0.4)                        # let the feed catch up after a flip
@@ -199,7 +200,7 @@ def serve(ctrl: Controller, port: int = 8000):
                             jpg = ctrl.jpeg
                         if jpg:
                             self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + jpg + b"\r\n")
-                        time.sleep(0.2)
+                        time.sleep(0.1)
                 except (BrokenPipeError, ConnectionResetError):
                     pass
             else:
