@@ -44,6 +44,7 @@ modes:
     shots: [{pose: overview, region: spread}]
     px_per_mm: 6            # warp resolution, enough for OCR
     read_order: [left, right]
+    max_words_per_page: 30  # demo-friendly: read the first few sentences only (null = whole page)
   scan:
     shots: [{pose: scan_left, region: left}, {pose: scan_right, region: right}]
     px_per_mm: 12           # ~300 dpi archival scan

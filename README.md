@@ -9,6 +9,7 @@ A uFactory arm, controlled through [Viam](https://www.viam.com/), holds a pencil
 | Mode | Command | For | Output |
 |------|---------|-----|--------|
 | **Read aloud** | `python -m bookworm read` | reading to children, or anyone who can't hold or see a book | speech, page by page |
+| **Both** | `python -m bookworm read --save-scan scans/mybook --max-words 30` | the demo: reads a short excerpt of each page and stores the scan | speech + the scan output |
 | **Scan** | `python -m bookworm scan --out scans/mybook` | non-destructive digitisation: no cutting the spine, no flatbed | `pages/0001.png…`, `book.txt`, `book.pdf`, `manifest.json` |
 
 Both share one loop:

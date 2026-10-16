@@ -1,4 +1,4 @@
-from .read_aloud import ReadAloud
+from .read_aloud import Combined, ReadAloud, excerpt
 from .scan import Scanner
 
-__all__ = ["ReadAloud", "Scanner"]
+__all__ = ["Combined", "ReadAloud", "Scanner", "excerpt"]

@@ -137,3 +137,24 @@ def test_summary_has_timing():
     summary = session.run()
     assert {"ocr", "flip", "capture"} <= set(summary.timing)
     assert "wall clock" in summary.timing_table()
+
+
+def test_excerpt_keeps_whole_sentences():
+    from bookworm.modes import excerpt
+
+    text = "The cat sat. The dog ran far away. Then it rained all day long."
+    assert excerpt(text, 5) == "The cat sat."
+    assert excerpt(text, 10) == "The cat sat. The dog ran far away."
+    assert excerpt(text, None) == text
+    assert excerpt("one two three four five six", 3) == "one two three..."
+
+
+def test_read_and_save_scan_together(tmp_path):
+    from bookworm.modes import Combined
+
+    session, _, _ = make_session([(2, WORDS), (4, WORDS)], handler=None)
+    speaker = PrintSpeaker()
+    session.handler = Combined(ReadAloud(speaker, session.cfg), Scanner(tmp_path, session.cfg))
+    session.run()
+    assert len(speaker.spoken) >= 4
+    assert (tmp_path / "book.pdf").exists() and len(list((tmp_path / "pages").glob("*.png"))) == 4

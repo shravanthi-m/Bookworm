@@ -27,10 +27,10 @@ Every `read` / `scan` run prints a per-stage timing table (move, settle, capture
 | Time | What happens |
 |-----:|--------------|
 | 0:00 | Pitch, one line each: accessible reading for kids and anyone who can't hold a book, plus non-destructive scanning. Book is already in the cradle, pencil in the gripper, arm at `overview`. |
-| 0:10 | `python -m bookworm read`. The first spread is captured and OCR'd (about 2–3 s), then it starts reading. |
+| 0:10 | `python -m bookworm read --save-scan scans/demo`. The first spread is captured and OCR'd (about 2–3 s), then it starts reading. Only the first ~30 words of each page are read (`--max-words`), and every page is stored as it goes. |
 | 0:15–1:30 | 4–5 spreads. Each flip happens *while* it reads. A flip check is visible (a double flip gets announced). |
 | 1:30 | Ctrl+C, or end of book: "The end." |
-| 1:35 | **Scan mode:** show `book.pdf` and `book.txt` from a scan recorded earlier (or scan one spread live if time allows). |
+| 1:35 | Open `scans/demo/book.pdf` and `book.txt`: the pages it just turned, stored as a scan. |
 | 1:55 | Close. |
 
 ## Choosing the book

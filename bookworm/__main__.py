@@ -59,12 +59,24 @@ def _run_mode(cfg, args, mode, handler_factory):
 
 
 def cmd_read(cfg, args):
-    from .modes import ReadAloud
+    import time
+
+    from .modes import Combined, ReadAloud, Scanner
     from .speech import make_speaker
 
     if args.quiet:
         cfg["speech"]["engine"] = "print"
-    _run_mode(cfg, args, "read", lambda: ReadAloud(make_speaker(cfg["speech"]), cfg))
+    if args.max_words is not None:
+        cfg["modes"]["read"]["max_words_per_page"] = args.max_words or None
+
+    def handler():
+        reader = ReadAloud(make_speaker(cfg["speech"]), cfg)
+        if args.save_scan is None:
+            return reader
+        out = args.save_scan or f"scans/{time.strftime('%Y%m%d-%H%M%S')}"
+        return Combined(reader, Scanner(out, cfg))
+
+    _run_mode(cfg, args, "read", handler)
 
 
 def cmd_scan(cfg, args):
@@ -306,6 +318,10 @@ def main(argv=None):
         m.add_argument("--max-spreads", type=int)
         if name == "read":
             m.add_argument("--quiet", action="store_true", help="print text instead of speaking")
+            m.add_argument("--save-scan", nargs="?", const="", metavar="DIR",
+                           help="also store the scan (pages, text, PDF); default dir scans/<timestamp>")
+            m.add_argument("--max-words", type=int, metavar="N",
+                           help="read only the first ~N words of each page (0 = whole page)")
         else:
             m.add_argument("--out", help="output folder (default scans/<timestamp>)")
     sub.add_parser("check")
