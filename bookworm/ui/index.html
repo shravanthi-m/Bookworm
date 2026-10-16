@@ -10,7 +10,28 @@
   body { margin: 0; background: var(--bg); color: var(--fg);
          font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; }
   main { display: grid; grid-template-columns: 1fr 240px; gap: 24px; padding: 24px; max-width: 1400px; margin: auto; }
-  h1 { font-size: 15px; font-weight: 600; margin: 0 0 16px; letter-spacing: .02em; }
+  /* title + a little pink worm inching back and forth under it */
+  .brand { position: relative; display: inline-block; margin: 0 0 18px; padding-bottom: 14px; }
+  h1 { font-size: 22px; font-weight: 650; margin: 0; letter-spacing: .01em; }
+  .worm { position: absolute; left: 0; bottom: 0; display: flex; align-items: flex-end;
+          animation: crawl 9s ease-in-out infinite; }
+  .worm i { width: 9px; height: 9px; margin-right: -3px; border-radius: 50%; background: #f4a3c0;
+            animation: inch .9s ease-in-out infinite; }
+  .worm i:nth-child(2) { animation-delay: .1s; } .worm i:nth-child(3) { animation-delay: .2s; }
+  .worm i:nth-child(4) { animation-delay: .3s; }
+  .worm b { position: relative; width: 11px; height: 11px; border-radius: 50%; background: #ee7fa8;
+            animation: inch .9s ease-in-out infinite .4s; }
+  .worm b::after { content: ""; position: absolute; width: 2.5px; height: 2.5px; border-radius: 50%;
+                   background: #3a2a30; top: 3px; right: 2.5px; }
+  @keyframes inch { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+  @keyframes crawl {
+    0%   { transform: translateX(0) scaleX(1); }
+    46%  { transform: translateX(calc(var(--w) - 46px)) scaleX(1); }
+    50%  { transform: translateX(calc(var(--w) - 46px)) scaleX(-1); }
+    96%  { transform: translateX(0) scaleX(-1); }
+    100% { transform: translateX(0) scaleX(1); }
+  }
+  @media (prefers-reduced-motion: reduce) { .worm, .worm i, .worm b { animation: none; } }
   .feed { width: 100%; border-radius: 6px; background: #000; display: block; aspect-ratio: 16 / 9; object-fit: contain; }
   .group { display: grid; gap: 8px; margin-bottom: 20px; }
   button { font: inherit; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px;
@@ -28,7 +49,10 @@
 <body>
 <main>
   <section>
-    <h1>Bookworm</h1>
+    <div class="brand" id="brand">
+      <h1>Bookworm</h1>
+      <span class="worm" aria-hidden="true"><i></i><i></i><i></i><i></i><b></b></span>
+    </div>
     <img class="feed" src="/feed" alt="Live camera">
     <p class="text" id="text"></p>
   </section>
@@ -52,6 +76,7 @@
 </main>
 <script>
   const $ = (id) => document.getElementById(id);
+  $("brand").style.setProperty("--w", $("brand").offsetWidth + "px");   // crawl the title's width
   const buttons = document.querySelectorAll("[data-do]");
   buttons.forEach((b) => b.onclick = () => fetch("/do/" + b.dataset.do, { method: "POST" }).then(poll));
   $("stop").onclick = () => fetch("/stop", { method: "POST" });
