@@ -23,6 +23,16 @@ Both share one loop:
  (page # +2? image changed?)
 ```
 
+## Control page
+
+```bash
+./bookworm.sh --config config/phone_mount.yaml ui           # http://localhost:8000
+```
+
+`./bookworm.sh` runs Bookworm with the project's `.venv` and clears any `PYTHONPATH` from other environments (a conda/ROS `PYTHONPATH` breaks numpy). Any `python -m bookworm …` command in this README works the same through it.
+
+Live feed plus Flip / Read / Scan, and Flip + Read / Flip + Scan. Flip runs `ui.flip_command` in the config, so any flip script can be plugged in.
+
 ## Hardware
 
 Fixed setup, already configured in Viam: **uFactory arm + gripper + calibrated wrist camera**, plus a pencil (eraser down) in the gripper. 3D-printed parts: a compliant pencil holder, a book cradle, and passive page holders in matte green. There are no servos or microcontrollers. Details: [docs/HARDWARE.md](docs/HARDWARE.md).
@@ -46,8 +56,7 @@ tests/                run without the arm, Viam, or a camera
 
 ```bash
 git clone https://github.com/shravanthi-m/Bookworm.git && cd Bookworm
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # then use ./bookworm.sh
 brew install tesseract          # macOS   |  sudo apt install tesseract-ocr espeak-ng  (Linux)
 cp .env.example .env            # then paste in the Viam API key (below)
 pytest                          # should pass with no hardware

@@ -1,0 +1,21 @@
+# Fixed overhead phone (Continuity Camera) via the `shrav-mac` Viam sub-part.
+# Use:  python -m bookworm --config config/phone_mount.yaml <command>
+#
+# Measured on the LIVE Viam feed (1920x1080) on 2026-10-16. The Viam `webcam` model defaults
+# to 640x480 — the sub-part sets width_px: 1920, height_px: 1080 on phone-cam; keep it.
+# Unlike phone *recordings* (which needed rotate 270), the live feed arrives upright.
+# The book must not move; if it does, re-run:  calibrate-view  and copy the corners here.
+robot:
+  camera: phone-cam
+  camera_calibrated: false
+
+vision:
+  rotate: 0
+  book_corners: [[600, 40], [1450, 15], [1495, 755], [600, 765]]   # TL TR BR BL of the spread
+  fallback_warp_size: [880, 740]
+
+modes:
+  read:
+    shots: [{pose: overview, region: spread}]   # overview = arm parked out of the phone's view
+  scan:
+    shots: [{pose: overview, region: spread}]

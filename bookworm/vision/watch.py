@@ -57,6 +57,20 @@ class _Viam:
         self.conn.close()
 
 
+class _Video:
+    def __init__(self, path, fps):
+        from .camera import video_frames
+
+        self.it = video_frames(path, 1.0 / fps)
+
+    def frames(self):
+        for _, frame in self.it:
+            yield frame
+
+    def close(self):
+        pass
+
+
 class _Folder:
     def __init__(self, folder):
         self.paths = sorted(p for p in Path(folder).iterdir() if p.suffix.lower() in (".jpg", ".jpeg", ".png", ".heic"))
@@ -82,9 +96,11 @@ def watch_flip(cfg: dict, args) -> None:
         src = _Webcam(args.webcam)
     elif args.images:
         src = _Folder(args.images)
+    elif args.video:
+        src = _Video(args.video, args.fps)
     else:
         src = _Viam(cfg)
-    realtime = args.images is None
+    realtime = args.images is None and args.video is None
     period = 1.0 / args.fps if realtime else 0.0
 
     recorder = ReferenceRecorder(mcfg["reference_dir"], args.record) if args.record else None

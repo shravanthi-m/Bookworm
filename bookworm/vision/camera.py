@@ -45,6 +45,31 @@ def read_image(path) -> np.ndarray | None:
     return img
 
 
+def video_frames(path, every_s: float = 1.0):
+    """Yield (time_s, frame) from a video file, one frame every ``every_s`` seconds.
+
+    Phone videos (.MOV/.MP4, HEVC) are decoded by OpenCV's FFmpeg backend; the phone's
+    rotation tag is applied automatically.
+    """
+    cap = cv2.VideoCapture(str(path))
+    if not cap.isOpened():
+        raise CameraError(f"cannot open video {path} (try: ffmpeg -i {path} -c:v libx264 out.mp4)")
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    step = max(1, int(round(every_s * fps)))
+    i = 0
+    try:
+        while True:
+            if not cap.grab():
+                return
+            if i % step == 0:
+                ok, frame = cap.retrieve()
+                if ok:
+                    yield i / fps, frame
+            i += 1
+    finally:
+        cap.release()
+
+
 class FileCamera:
     """Returns images from a folder in sorted order — one image per spread.
 

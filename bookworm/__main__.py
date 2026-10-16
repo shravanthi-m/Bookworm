@@ -15,10 +15,14 @@ Setup / calibration (writes config/local.yaml)
     webcams                list local cameras on this computer (find the phone's index)
     overlay POSE           move to POSE, draw the projected book outline -> runs/overlay.jpg
 
+UI
+    ui                     local page: live feed + Flip / Read / Scan (+ combined) buttons
+
 Development
     vision --images DIR    vision-only test bench on photos (accuracy report, debug panels)
     vision --live          same, on the live Viam camera — never moves the arm
     vision --webcam N      same, on a local camera (e.g. iPhone Continuity Camera), no Viam needed
+    vision --video FILE    same, on a recorded video (one frame every --every seconds)
     watch-flip             fold detector: --record good|bad flips, then watch live (never moves the arm)
     ocr IMAGE              vision pipeline on one photo; debug images in runs/debug/
     flip [--times N]       run the flip motion only (tuning)
@@ -50,11 +54,11 @@ def _save_local(updates: dict):
 def _run_mode(cfg, args, mode, handler_factory):
     from .rig import build_robot
     from .session import BookSession
-    from .vision import TesseractOcr
+    from .vision import make_ocr
 
     robot, close = build_robot(cfg, images_dir=args.images, mock=args.mock)
     try:
-        session = BookSession(robot, TesseractOcr(**cfg["ocr"]), handler_factory(), cfg, mode)
+        session = BookSession(robot, make_ocr(cfg["ocr"]), handler_factory(), cfg, mode)
         s = session.run(max_spreads=args.max_spreads)
         print(f"{s.spreads} spreads, flips {s.flips}, stopped: {s.stopped_because}")
     except KeyboardInterrupt:
@@ -323,7 +327,7 @@ def cmd_vision(cfg, args):
     import time
 
     from .hardware import BookFrame
-    from .vision import FileCamera, TesseractOcr
+    from .vision import FileCamera, make_ocr
     from .vision.bench import VisionBench
     from .vision.camera import read_image
 
@@ -331,11 +335,19 @@ def cmd_vision(cfg, args):
     if args.rotate is not None:
         cfg["vision"]["rotate"] = args.rotate
     book = BookFrame.from_config(cfg["book"])
-    bench = VisionBench(cfg, TesseractOcr(**cfg["ocr"]), out, args.region, book)
+    bench = VisionBench(cfg, make_ocr(cfg["ocr"]), out, args.region, book)
     if args.images:
         cam = FileCamera(args.images)
         for path in cam.paths:
             bench.process(path.name, read_image(path), truth_dir=Path(args.images))
+    elif args.video:
+        from .vision.camera import video_frames
+
+        (out / "frames").mkdir(parents=True, exist_ok=True)
+        for t, frame in video_frames(args.video, args.every):
+            name = f"t{t:07.2f}s.jpg"
+            cv2.imwrite(str(out / "frames" / name), frame)        # reusable: vision --images <out>/frames
+            bench.process(name, frame)
     elif args.webcam is not None:
         for i in range(args.frames):
             frame = _webcam_frame(args.webcam)
@@ -381,8 +393,31 @@ def cmd_pdf(cfg, args):
               ocr_input=cfg["vision"].get("ocr_input", "gray"))
 
 
+def cmd_ui(cfg, args):
+    import time
+
+    from .ui.server import Controller, serve
+
+    if args.quiet:
+        cfg["speech"]["engine"] = "print"
+    if args.images:
+        from .vision import FileCamera
+
+        camera = FileCamera(args.images)
+    else:
+        from .ui.server import LazyViamCamera
+
+        camera = LazyViamCamera(cfg)
+    try:
+        out = args.out or f"scans/{time.strftime('%Y%m%d-%H%M%S')}"
+        serve(Controller(cfg, camera, args.config, out), args.port)
+    finally:
+        if hasattr(camera, "close"):
+            camera.close()
+
+
 def cmd_ocr(cfg, args):
-    from .vision import TesseractOcr, process_shot, sharpness
+    from .vision import make_ocr, ocr_image, process_shot, sharpness
 
     from .vision.camera import read_image
 
@@ -390,15 +425,15 @@ def cmd_ocr(cfg, args):
     if frame is None:
         sys.exit(f"cannot read {args.image}")
     pages = process_shot(frame, "spread", cfg["vision"])
-    ocr = TesseractOcr(**cfg["ocr"])
+    ocr = make_ocr(cfg["ocr"])
     debug = Path("runs/debug")
     debug.mkdir(parents=True, exist_ok=True)
     print(f"sharpness: {sharpness(frame):.1f}")
     for side, page in pages.items():
         cv2.imwrite(str(debug / f"{side}_color.png"), page.color)
         cv2.imwrite(str(debug / f"{side}_ocr.png"), page.ocr)
-        res = ocr.read(page.ocr)
-        pn = ocr.page_number(page.ocr, cfg["vision"]["page_number_region"])
+        res = ocr.read(ocr_image(ocr, page))
+        pn = ocr.page_number(ocr_image(ocr, page), cfg["vision"]["page_number_region"])
         print(f"\n=== {side}: page {pn}, conf {res.mean_conf:.0f}, {res.word_count} words ===\n{res.text}")
     print(f"\ndebug images in {debug}/")
 
@@ -467,6 +502,8 @@ def main(argv=None):
     src.add_argument("--live", action="store_true", help="the configured Viam camera (robot.camera)")
     src.add_argument("--webcam", type=int, metavar="N", help="local camera N on this computer, e.g. iPhone "
                      "Continuity Camera (list with: bookworm webcams)")
+    src.add_argument("--video", help="a recorded video file (.MOV/.mp4); samples one frame every --every s")
+    vb.add_argument("--every", type=float, default=2.0, help="--video: seconds between sampled frames")
     vb.add_argument("--frames", type=int, default=1)
     vb.add_argument("--interval", type=float, default=2.0)
     vb.add_argument("--manual", action="store_true", help="wait for Enter between live frames (hand-flip test)")
@@ -477,6 +514,7 @@ def main(argv=None):
     wf_src.add_argument("--webcam", type=int, metavar="N")
     wf_src.add_argument("--live", action="store_true", help="the configured Viam camera")
     wf_src.add_argument("--images", help="replay saved frames (e.g. runs/watch-*/frames)")
+    wf_src.add_argument("--video", help="replay a recorded video of a flip")
     wf.add_argument("--record", choices=["good", "bad"], help="save frames as a GOOD/BAD reference instead of judging")
     wf.add_argument("--fps", type=float, default=8.0)
     wf.add_argument("--max-deviation", type=float, help="override vision.flip_monitor.max_deviation")
@@ -485,6 +523,11 @@ def main(argv=None):
     pdf.add_argument("scan_dir")
     pdf.add_argument("--out", help="output file (default <scan_dir>/book.pdf)")
     pdf.add_argument("--no-text", action="store_true", help="images only, no OCR text layer")
+    ui = sub.add_parser("ui", help="local control page: live feed + Flip / Read / Scan buttons")
+    ui.add_argument("--port", type=int, default=8000)
+    ui.add_argument("--images", help="use a folder of photos instead of the camera (Flip advances)")
+    ui.add_argument("--out", help="scan folder (default scans/<timestamp>)")
+    ui.add_argument("--quiet", action="store_true", help="print instead of speaking")
     o = sub.add_parser("ocr")
     o.add_argument("image")
     f = sub.add_parser("flip")
@@ -499,7 +542,7 @@ def main(argv=None):
     handlers = {"read": cmd_read, "scan": cmd_scan, "check": cmd_check, "pencil": cmd_pencil,
                 "save-pose": cmd_save_pose, "calibrate-book": cmd_calibrate_book,
                 "calibrate-tool-mask": cmd_calibrate_tool_mask, "calibrate-view": cmd_calibrate_view,
-                "webcams": cmd_webcams, "watch-flip": cmd_watch_flip, "pdf": cmd_pdf,
+                "webcams": cmd_webcams, "watch-flip": cmd_watch_flip, "pdf": cmd_pdf, "ui": cmd_ui,
                 "overlay": cmd_overlay, "vision": cmd_vision, "ocr": cmd_ocr, "flip": cmd_flip}
     handlers[args.cmd](cfg, args)
 

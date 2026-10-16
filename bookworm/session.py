@@ -18,6 +18,7 @@ from pathlib import Path
 import cv2
 
 from .hardware import BookFrame, HardwareError, Robot, page_quad, run_flip
+from .vision import ocr_image
 from .vision import (FlipOutcome, Page, book_quad_pixels, classify_flip, locate_right_corner,
                      process_shot, sharpness)
 
@@ -121,7 +122,7 @@ class BookSession:
 
     def _page_number(self, pages) -> int | None:
         frac = self.cfg["vision"]["page_number_region"]
-        futs = {s: self.pool.submit(self.ocr.page_number, pages[s].ocr, frac)
+        futs = {s: self.pool.submit(self.ocr.page_number, ocr_image(self.ocr, pages[s]), frac)
                 for s in ("left", "right") if s in pages}
         nums = {s: f.result() for s, f in futs.items()}
         if nums.get("left") is not None:
@@ -197,7 +198,7 @@ class BookSession:
         blanks = 0
         while True:
             with self._timed("ocr"):
-                futs = {side: self.pool.submit(self.ocr.read, page.ocr) for side, page in spread.pages.items()}
+                futs = {side: self.pool.submit(self.ocr.read, ocr_image(self.ocr, page)) for side, page in spread.pages.items()}
                 results = {side: f.result() for side, f in futs.items()}
             self._save_debug(summary.spreads, spread, results)
             with self._timed("handler"):

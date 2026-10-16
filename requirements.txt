@@ -7,3 +7,4 @@ PyYAML>=6.0
 Pillow>=10.0
 pypdf>=4.0
 pytest>=7.0
+ocrmac>=1.0; sys_platform == "darwin"

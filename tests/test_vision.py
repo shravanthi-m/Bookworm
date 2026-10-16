@@ -207,3 +207,18 @@ def test_tool_mask_applied_in_process_shot(tmp_path):
     cv2.imwrite(str(tmp_path / "m.png"), m)
     out = apply_tool_mask(img, str(tmp_path / "m.png"))
     assert out[500, 1550].mean() > 150                                       # painted over with paper
+
+
+def test_apple_vision_ocr_reads_page_and_number():
+    pytest.importorskip("ocrmac")
+    import sys
+    if sys.platform != "darwin":
+        pytest.skip("macOS only")
+    from bookworm.vision import AppleVisionOcr, ocr_image
+
+    pages = process_shot(make_spread(), "spread", VCFG)
+    ocr = AppleVisionOcr()
+    img = ocr_image(ocr, pages["left"])
+    assert img.ndim == 3                                       # Apple engine gets the colour page
+    assert "hello world" in ocr.read(img).text.lower()
+    assert ocr.page_number(img, 0.08) == 12

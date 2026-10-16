@@ -89,9 +89,11 @@ class VisionBench:
 
         t1 = time.perf_counter()
         for side, page in pages.items():
-            res = self.ocr.read(page.ocr)
+            from .ocr import ocr_image
+
+            res = self.ocr.read(ocr_image(self.ocr, page))
             pr = {"words": res.word_count, "conf": round(res.mean_conf, 1),
-                  "page_no": self.ocr.page_number(page.ocr, v["page_number_region"]),
+                  "page_no": self.ocr.page_number(ocr_image(self.ocr, page), v["page_number_region"]),
                   "readable": res.mean_conf >= self.cfg["ocr"]["min_page_conf"]}
             truth = truth_dir / f"{Path(name).stem}.{side}.txt" if truth_dir else None
             if truth and truth.exists():
