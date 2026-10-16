@@ -38,6 +38,9 @@ class Robot(ABC):
     def capture(self) -> np.ndarray:
         """BGR image from the wrist camera."""
 
+    def stop(self) -> None:
+        """Halt any arm motion in progress (no-op where there is nothing to stop)."""
+
     def camera_geometry(self) -> CameraGeometry | None:
         """Intrinsics + current camera pose, or None if unknown (mock / photos)."""
         return None

@@ -87,6 +87,9 @@ class ViamRobot(Robot):
 
         self.conn.call(self.arm.move_to_position(Pose(**{k: float(pose[k]) for k in POSE_KEYS})))
 
+    def stop(self):
+        self.conn.call(self.arm.stop(), timeout=10)
+
     def end_pose(self):
         p = self.conn.call(self.arm.get_end_position())
         return {k: getattr(p, k) for k in POSE_KEYS}

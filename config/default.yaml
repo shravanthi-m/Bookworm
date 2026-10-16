@@ -39,9 +39,12 @@ book:
   spine_bottom: null        # [x, y, z] eraser-tip position, world mm
   spine_top: null
   right_corner: null        # bottom outer corner of the right page
-  page_width_mm: 140
-  page_height_mm: 210
-  z_drop_per_flip_mm: 0.1   # right stack gets thinner as leaves move to the left
+  left_corner: null         # optional: bottom outer corner of the LEFT page (gives the left stack height)
+  # Page block size. Sophie's World paperback: cover 130 x 197 mm. The flip uses the
+  # calibrated spine->corner distance when available; these set the OCR crop.
+  page_width_mm: 129
+  page_height_mm: 196
+  z_drop_per_flip_mm: 0.13  # leaf thickness: right stack drops / left stack rises by this per flip
 
 modes:
   read:
@@ -93,11 +96,16 @@ flip:
   use_vision_corner: true   # refine the page corner from the image before each flip
   # Pencil-eraser flip as waypoints in the BOOK frame (mm). Tune on the rig — no code changes.
   #   move:    {x, y, z, from: corner|spine}   corner = detected bottom-outer corner of right page
-  #            z is above the right page surface; small negative z = press (spring holder absorbs)
+  #            surface: right (default) | left  -> z is above THAT stack's current top
+  #            small negative z = press (the pencil is rigid, so keep it within limits.max_press_mm)
   #   gripper: {action: open|grab}
   #   wait:    {s: seconds}
   # Starting point only: press near the corner, drag toward the spine so the leaf
   # buckles up, slip the eraser under the raised corner, then carry it over the spine.
+  # Every waypoint is checked against `limits` before the arm moves at all.
+  limits:
+    max_press_mm: 4         # never push the eraser more than this into a page (pencil is rigid)
+    margin_mm: 40           # waypoints must stay within the book outline plus this margin
   sequence:
     - {move: {x: -20, y: 20, z: 30, from: corner}}   # hover inside the corner
     - {move: {x: -20, y: 20, z: -2, from: corner}}   # press eraser onto the leaf
@@ -107,9 +115,18 @@ flip:
     - {move: {x: 5,   y: 20, z: 6,  from: corner}}   # slide outward under the raised corner
     - {move: {x: 5,   y: 20, z: 60, from: corner}}   # lift the leaf
     - {move: {x: 0,   y: 60, z: 120, from: spine}}   # carry over the spine
-    - {move: {x: -100, y: 60, z: 40, from: spine}}   # lay it on the left
-    - {move: {x: -100, y: 60, z: 80, from: spine}}   # retreat up
+    - {move: {x: -95, y: 60, z: 25, surface: left}}  # lower it on the left, edge short of the page rack
+    - {move: {x: -95, y: -15, z: 25, surface: left}} # slide out under the bottom edge; the leaf drops
+    - {move: {x: -95, y: -15, z: 40, surface: left}}
+    # Page rack (cad/): flatten the leaf from the spine outward so its edge slides under a shelf.
+    - {move: {x: -25, y: 60, z: 15, surface: left}}  # hover near the spine
+    - {move: {x: -25, y: 60, z: -1, surface: left}}  # light press
+    - {move: {x: -110, y: 60, z: -1, surface: left}} # drag outward: the bow flattens, edge goes under the shelf
+    - {move: {x: -110, y: 60, z: 60, surface: left}} # retreat up
 
 run:
   blank_spreads_to_stop: 2  # consecutive blank spreads => end of book
+  # When a flip still fails after retries: pause = ask for help, wait for Enter, then carry on
+  # (unattended runs); stop = end the run. Pause only applies on the real arm in a terminal.
+  on_flip_fail: pause
   save_dir: runs            # every capture + OCR text saved here for debugging

@@ -9,7 +9,7 @@ import numpy as np
 
 
 class BookFrame:
-    def __init__(self, spine_bottom, spine_top, right_corner):
+    def __init__(self, spine_bottom, spine_top, right_corner, left_corner=None):
         o = np.asarray(spine_bottom, float)
         ey = np.asarray(spine_top, float) - o
         ey[2] = 0
@@ -20,16 +20,23 @@ class BookFrame:
         ex /= np.linalg.norm(ex)
         self.ex, self.ey, self.ez = ex, ey, np.array([0.0, 0.0, 1.0])
         self.origin = np.array([o[0], o[1], float(right_corner[2])])
+        # Measured right-page width (spine -> touched corner), so the flip doesn't rely on
+        # page_width_mm in config. None for the identity frame used by mock runs.
+        self.right_width = float((np.asarray(right_corner, float) - self.origin) @ ex)
+        # Height of the left stack relative to the right one at calibration (optional 4th point).
+        self.left_dz = None if left_corner is None else float(left_corner[2]) - float(right_corner[2])
 
     @classmethod
     def from_config(cls, bcfg: dict) -> "BookFrame | None":
         pts = [bcfg.get(k) for k in ("spine_bottom", "spine_top", "right_corner")]
-        return cls(*pts) if all(p is not None for p in pts) else None
+        return cls(*pts, bcfg.get("left_corner")) if all(p is not None for p in pts) else None
 
     @classmethod
     def identity(cls) -> "BookFrame":
         """For mock runs: book frame == world frame."""
-        return cls([0, 0, 0], [0, 1, 0], [1, 0, 0])
+        frame = cls([0, 0, 0], [0, 1, 0], [1, 0, 0])
+        frame.right_width = None
+        return frame
 
     def to_world(self, x, y, z=0.0) -> np.ndarray:
         return self.origin + x * self.ex + y * self.ey + z * self.ez

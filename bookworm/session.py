@@ -8,6 +8,7 @@ A mode (read aloud / scan) is a handler object with:
 from __future__ import annotations
 
 import logging
+import sys
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
@@ -17,7 +18,7 @@ from pathlib import Path
 
 import cv2
 
-from .hardware import BookFrame, HardwareError, Robot, page_quad, run_flip
+from .hardware import BookFrame, HardwareError, Robot, page_quad, retreat, run_flip
 from .vision import (FlipOutcome, Page, book_quad_pixels, classify_flip, locate_right_corner,
                      process_shot, sharpness)
 
@@ -62,6 +63,10 @@ class BookSession:
         self.flips_done = 0
         self.times: dict[str, list[float]] = defaultdict(list)
         self.pool = ThreadPoolExecutor(max_workers=4)   # tesseract runs as subprocesses -> real parallelism
+        # How to ask a person for help when a flip keeps failing: a callable(prompt) -> reply,
+        # or None to stop the run instead. Only the real arm in a terminal pauses by default.
+        interactive = cfg["robot"]["backend"] == "viam" and sys.stdin.isatty()
+        self.ask_for_help = input if interactive and cfg["run"].get("on_flip_fail") == "pause" else None
         self.run_dir = None
         if cfg["run"].get("save_dir"):
             self.run_dir = Path(cfg["run"]["save_dir"]) / f"{time.strftime('%Y%m%d-%H%M%S')}-{mode}"
@@ -180,6 +185,10 @@ class BookSession:
         t_start = time.perf_counter()
         try:
             summary = self._run(max_spreads)
+        except BaseException:
+            # Ctrl+C or any error mid-run: never leave the pencil pressing on the page.
+            retreat(self.robot, self.cfg)
+            raise
         finally:
             self.pool.shutdown(wait=False)
         summary.seconds = time.perf_counter() - t_start
@@ -188,6 +197,29 @@ class BookSession:
         log.info("summary: %s", summary)
         print(summary.timing_table())
         return summary
+
+    def _wait_for_help(self, before: Spread) -> Spread | None:
+        """Pause until a person turns the page by hand, then return the new spread.
+
+        Returns None (stop the run) if no one can be asked or they type q.
+        """
+        if self.ask_for_help is None:
+            return None
+        if self.cfg["poses"].get("home"):
+            self.robot.move_to(self.cfg["poses"]["home"])   # get the arm out of the way
+        side = "left" if "left" in before.pages else "right"
+        while True:
+            reply = self.ask_for_help("\nFlip failed. Turn the page by hand (tuck it under the rack), "
+                                      "then press Enter to continue, or type q to stop: ")
+            if reply.strip().lower() == "q":
+                return None
+            after = self.capture_spread()
+            outcome = classify_flip(before.pages[side].ocr, after.pages[side].ocr, before.page_no,
+                                    after.page_no, self.cfg["verify"]["change_threshold"])
+            if outcome != FlipOutcome.NO_FLIP:
+                self.flips_done += 1    # keeps the stack-height compensation in step
+                return after
+            print("The spread looks unchanged.")
 
     def _run(self, max_spreads: int | None) -> RunSummary:
         summary = RunSummary()
@@ -220,8 +252,11 @@ class BookSession:
             summary.flips[outcome.value] = summary.flips.get(outcome.value, 0) + 1
             if outcome == FlipOutcome.NO_FLIP:
                 self.handler.on_event("flip_failed")
-                summary.stopped_because = "flip failed"
-                break
+                nxt = self._wait_for_help(spread)
+                if nxt is None:
+                    summary.stopped_because = "flip failed"
+                    break
+                summary.flips["by_hand"] = summary.flips.get("by_hand", 0) + 1
             if outcome in (FlipOutcome.MULTI_FLIP, FlipOutcome.BACKWARD):
                 self.handler.on_event(outcome.value)
             spread = nxt

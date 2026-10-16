@@ -165,6 +165,13 @@ def cmd_calibrate_book(cfg, args):
             input(f"Jog the arm so the eraser tip just touches the {what}, then press Enter...")
             points[key] = [round(v, 2) for v in flange_to_tip(robot.end_pose(), cfg["robot"])]
             print(f"  {key} = {points[key]}")
+        # Optional: the left stack's height, used to lay and flatten turned leaves on the left.
+        if input("Optional: touch the BOTTOM-OUTER corner of the LEFT page and press Enter "
+                 "(or type s to skip)... ").strip().lower() != "s":
+            points["left_corner"] = [round(v, 2) for v in flange_to_tip(robot.end_pose(), cfg["robot"])]
+            print(f"  left_corner = {points['left_corner']}")
+        else:
+            points["left_corner"] = None    # don't keep a stale point from an earlier calibration
     finally:
         close()
     _save_local({"book": points})
@@ -381,12 +388,25 @@ def cmd_ocr(cfg, args):
 def cmd_flip(cfg, args):
     import time
 
-    from .hardware import BookFrame, run_flip
+    from .hardware import BookFrame, plan_flip, retreat, run_flip
     from .rig import build_robot
 
     book = BookFrame.from_config(cfg["book"])
     if book is None and not args.mock:
         sys.exit("run calibrate-book first")
+    if args.dry_run:
+        # Print every planned eraser position (book mm and world mm). Nothing connects or moves;
+        # an out-of-limits waypoint raises here, before it could ever reach the arm.
+        for i in range(args.times):
+            print(f"flip {i + 1}/{args.times}  (stack heights after {i} flips)")
+            for step in plan_flip(book or BookFrame.identity(), cfg, flip_index=i):
+                if step[0] == "move":
+                    b, w = step[2], step[1]
+                    print(f"  move  book ({b[0]:7.1f}, {b[1]:6.1f}, {b[2]:6.1f}) [{step[3]:5}]"
+                          f"   world ({w[0]:7.1f}, {w[1]:7.1f}, {w[2]:7.1f})")
+                else:
+                    print(f"  {step[0]:5} {step[1]}")
+        return
     robot, close = build_robot(cfg, mock=args.mock)
     if args.mock:
         robot.verbose = True
@@ -397,6 +417,9 @@ def cmd_flip(cfg, args):
             if cfg["poses"].get("home"):
                 robot.move_to(cfg["poses"]["home"])
             time.sleep(args.pause)
+    except BaseException:
+        retreat(robot, cfg)     # Ctrl+C mid-flip: lift the pencil off the page first
+        raise
     finally:
         close()
 
@@ -452,6 +475,8 @@ def main(argv=None):
     f.add_argument("--times", type=int, default=1)
     f.add_argument("--pause", type=float, default=2.0)
     f.add_argument("--mock", action="store_true")
+    f.add_argument("--dry-run", action="store_true",
+                   help="print every planned eraser position without connecting or moving")
 
     args = p.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
