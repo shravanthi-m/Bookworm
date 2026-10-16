@@ -118,6 +118,11 @@ flip:
     - {move: {x: -100, y: 60, z: 40, from: spine}}   # lay it on the left
     - {move: {x: -100, y: 60, z: 80, from: spine}}   # retreat up
 
+ui:
+  # Command the Flip button runs, e.g. a teammate's script: "python scripts/flip.py --once".
+  # null = python -m bookworm flip (with the same --config).
+  flip_command: null
+
 run:
   blank_spreads_to_stop: 2  # consecutive blank spreads => end of book
   save_dir: runs            # every capture + OCR text saved here for debugging

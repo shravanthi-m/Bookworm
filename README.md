@@ -23,6 +23,14 @@ Both share one loop:
  (page # +2? image changed?)
 ```
 
+## Control page
+
+```bash
+python -m bookworm --config config/phone_mount.yaml ui      # http://localhost:8000
+```
+
+Live feed plus Flip / Read / Scan, and Flip + Read / Flip + Scan. Flip runs `ui.flip_command` in the config, so any flip script can be plugged in.
+
 ## Hardware
 
 Fixed setup, already configured in Viam: **uFactory arm + gripper + calibrated wrist camera**, plus a pencil (eraser down) in the gripper. 3D-printed parts: a compliant pencil holder, a book cradle, and passive page holders in matte green. There are no servos or microcontrollers. Details: [docs/HARDWARE.md](docs/HARDWARE.md).

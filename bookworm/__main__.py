@@ -15,6 +15,9 @@ Setup / calibration (writes config/local.yaml)
     webcams                list local cameras on this computer (find the phone's index)
     overlay POSE           move to POSE, draw the projected book outline -> runs/overlay.jpg
 
+UI
+    ui                     local page: live feed + Flip / Read / Scan (+ combined) buttons
+
 Development
     vision --images DIR    vision-only test bench on photos (accuracy report, debug panels)
     vision --live          same, on the live Viam camera — never moves the arm
@@ -390,6 +393,31 @@ def cmd_pdf(cfg, args):
               ocr_input=cfg["vision"].get("ocr_input", "gray"))
 
 
+def cmd_ui(cfg, args):
+    import time
+
+    from .ui.server import Controller, serve
+
+    if args.quiet:
+        cfg["speech"]["engine"] = "print"
+    conn = None
+    if args.images:
+        from .vision import FileCamera
+
+        camera = FileCamera(args.images)
+    else:
+        from .hardware.viam_robot import ViamConnection, ViamRobot
+
+        conn = ViamConnection()
+        camera = ViamRobot(conn, **cfg["robot"])
+    try:
+        out = args.out or f"scans/{time.strftime('%Y%m%d-%H%M%S')}"
+        serve(Controller(cfg, camera, args.config, out), args.port)
+    finally:
+        if conn:
+            conn.close()
+
+
 def cmd_ocr(cfg, args):
     from .vision import TesseractOcr, process_shot, sharpness
 
@@ -497,6 +525,11 @@ def main(argv=None):
     pdf.add_argument("scan_dir")
     pdf.add_argument("--out", help="output file (default <scan_dir>/book.pdf)")
     pdf.add_argument("--no-text", action="store_true", help="images only, no OCR text layer")
+    ui = sub.add_parser("ui", help="local control page: live feed + Flip / Read / Scan buttons")
+    ui.add_argument("--port", type=int, default=8000)
+    ui.add_argument("--images", help="use a folder of photos instead of the camera (Flip advances)")
+    ui.add_argument("--out", help="scan folder (default scans/<timestamp>)")
+    ui.add_argument("--quiet", action="store_true", help="print instead of speaking")
     o = sub.add_parser("ocr")
     o.add_argument("image")
     f = sub.add_parser("flip")
@@ -511,7 +544,7 @@ def main(argv=None):
     handlers = {"read": cmd_read, "scan": cmd_scan, "check": cmd_check, "pencil": cmd_pencil,
                 "save-pose": cmd_save_pose, "calibrate-book": cmd_calibrate_book,
                 "calibrate-tool-mask": cmd_calibrate_tool_mask, "calibrate-view": cmd_calibrate_view,
-                "webcams": cmd_webcams, "watch-flip": cmd_watch_flip, "pdf": cmd_pdf,
+                "webcams": cmd_webcams, "watch-flip": cmd_watch_flip, "pdf": cmd_pdf, "ui": cmd_ui,
                 "overlay": cmd_overlay, "vision": cmd_vision, "ocr": cmd_ocr, "flip": cmd_flip}
     handlers[args.cmd](cfg, args)
 

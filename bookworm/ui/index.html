@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bookworm</title>
+<style>
+  :root { --bg: #f6f5f2; --fg: #1d1d1b; --muted: #8a8780; --line: #dcd9d2; --accent: #2f5d50; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; }
+  main { display: grid; grid-template-columns: 1fr 240px; gap: 24px; padding: 24px; max-width: 1400px; margin: auto; }
+  h1 { font-size: 15px; font-weight: 600; margin: 0 0 16px; letter-spacing: .02em; }
+  .feed { width: 100%; border-radius: 6px; background: #000; display: block; aspect-ratio: 16 / 9; object-fit: contain; }
+  .group { display: grid; gap: 8px; margin-bottom: 20px; }
+  button { font: inherit; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px;
+           background: #fff; color: var(--fg); cursor: pointer; text-align: left; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { color: var(--muted); cursor: default; }
+  .primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .stop { color: #a33; }
+  .status { font-size: 13px; color: var(--muted); min-height: 1.4em; }
+  .text { margin-top: 16px; font-size: 14px; max-height: 140px; overflow: auto; }
+  a { color: var(--accent); font-size: 13px; }
+  @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <section>
+    <h1>Bookworm</h1>
+    <img class="feed" src="/feed" alt="Live camera">
+    <p class="text" id="text"></p>
+  </section>
+  <aside>
+    <div class="group">
+      <button class="primary" data-do="flip_read">Flip + Read</button>
+      <button class="primary" data-do="flip_scan">Flip + Scan</button>
+      <button disabled title="Coming later">Flip + Summarise</button>
+    </div>
+    <div class="group">
+      <button data-do="flip">Flip</button>
+      <button data-do="read">Read</button>
+      <button data-do="scan">Scan</button>
+    </div>
+    <div class="group">
+      <button class="stop" id="stop">Stop</button>
+    </div>
+    <div class="status" id="status">Ready</div>
+    <a id="pdf" href="/book.pdf" target="_blank" hidden>Open scan PDF</a>
+  </aside>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const buttons = document.querySelectorAll("[data-do]");
+  buttons.forEach((b) => b.onclick = () => fetch("/do/" + b.dataset.do, { method: "POST" }).then(poll));
+  $("stop").onclick = () => fetch("/stop", { method: "POST" });
+  async function poll() {
+    try {
+      const s = await (await fetch("/state")).json();
+      $("status").textContent = s.status + (s.pages ? ` · ${s.pages} pages scanned` : "");
+      $("text").textContent = s.text;
+      $("pdf").hidden = !s.pdf;
+      buttons.forEach((b) => b.disabled = s.busy);
+    } catch (e) { $("status").textContent = "Disconnected"; }
+  }
+  setInterval(poll, 1000); poll();
+</script>
+</body>
+</html>
