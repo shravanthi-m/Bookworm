@@ -3,7 +3,7 @@
 Output layout:
     <out>/pages/0001.png  0001.txt  ...     one file pair per page, in reading order
     <out>/book.txt                          all text with page markers
-    <out>/book.pdf                          page images as a PDF
+    <out>/book.pdf                          searchable PDF: colour page images + invisible OCR text
     <out>/manifest.json                     page numbers, OCR confidence, flip problems
 """
 from __future__ import annotations
@@ -60,7 +60,16 @@ class Scanner:
     def _write_pdf(self):
         if not self.pages:
             return
-        from PIL import Image
+        from ..archive import build_pdf
 
-        imgs = [Image.open(self.out / p["file"]).convert("RGB") for p in self.pages]
-        imgs[0].save(self.out / "book.pdf", save_all=True, append_images=imgs[1:])
+        o = self.cfg["ocr"]
+        try:
+            build_pdf(self.out, searchable=self.cfg["modes"]["scan"].get("searchable_pdf", True),
+                      lang=o["lang"], psm=o["psm"], page_width_mm=self.cfg["book"]["page_width_mm"],
+                      ocr_input=self.cfg["vision"].get("ocr_input", "gray"))
+        except Exception as e:  # noqa: BLE001 - never lose a scan over the PDF; pages + text are saved
+            print(f"[scan] searchable PDF failed ({e}); writing image-only PDF")
+            from PIL import Image
+
+            imgs = [Image.open(self.out / p["file"]).convert("RGB") for p in self.pages]
+            imgs[0].save(self.out / "book.pdf", save_all=True, append_images=imgs[1:])
