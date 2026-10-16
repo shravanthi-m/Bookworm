@@ -19,6 +19,7 @@ Development
     vision --images DIR    vision-only test bench on photos (accuracy report, debug panels)
     vision --live          same, on the live Viam camera — never moves the arm
     vision --webcam N      same, on a local camera (e.g. iPhone Continuity Camera), no Viam needed
+    vision --video FILE    same, on a recorded video (one frame every --every seconds)
     watch-flip             fold detector: --record good|bad flips, then watch live (never moves the arm)
     ocr IMAGE              vision pipeline on one photo; debug images in runs/debug/
     flip [--times N]       run the flip motion only (tuning)
@@ -336,6 +337,14 @@ def cmd_vision(cfg, args):
         cam = FileCamera(args.images)
         for path in cam.paths:
             bench.process(path.name, read_image(path), truth_dir=Path(args.images))
+    elif args.video:
+        from .vision.camera import video_frames
+
+        (out / "frames").mkdir(parents=True, exist_ok=True)
+        for t, frame in video_frames(args.video, args.every):
+            name = f"t{t:07.2f}s.jpg"
+            cv2.imwrite(str(out / "frames" / name), frame)        # reusable: vision --images <out>/frames
+            bench.process(name, frame)
     elif args.webcam is not None:
         for i in range(args.frames):
             frame = _webcam_frame(args.webcam)
@@ -467,6 +476,8 @@ def main(argv=None):
     src.add_argument("--live", action="store_true", help="the configured Viam camera (robot.camera)")
     src.add_argument("--webcam", type=int, metavar="N", help="local camera N on this computer, e.g. iPhone "
                      "Continuity Camera (list with: bookworm webcams)")
+    src.add_argument("--video", help="a recorded video file (.MOV/.mp4); samples one frame every --every s")
+    vb.add_argument("--every", type=float, default=2.0, help="--video: seconds between sampled frames")
     vb.add_argument("--frames", type=int, default=1)
     vb.add_argument("--interval", type=float, default=2.0)
     vb.add_argument("--manual", action="store_true", help="wait for Enter between live frames (hand-flip test)")
@@ -477,6 +488,7 @@ def main(argv=None):
     wf_src.add_argument("--webcam", type=int, metavar="N")
     wf_src.add_argument("--live", action="store_true", help="the configured Viam camera")
     wf_src.add_argument("--images", help="replay saved frames (e.g. runs/watch-*/frames)")
+    wf_src.add_argument("--video", help="replay a recorded video of a flip")
     wf.add_argument("--record", choices=["good", "bad"], help="save frames as a GOOD/BAD reference instead of judging")
     wf.add_argument("--fps", type=float, default=8.0)
     wf.add_argument("--max-deviation", type=float, help="override vision.flip_monitor.max_deviation")

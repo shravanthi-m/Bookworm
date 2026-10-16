@@ -48,7 +48,9 @@ python -m bookworm vision --webcam N            # compare words/conf with the wr
 ```
 macOS asks for camera permission the first time (System Settings → Privacy & Security → Camera → allow your terminal / VS Code).
 
-**2. Put it in Viam as a sub-part of the machine:**
+**Status (2026-10-16):** sub-part `shrav-mac` with camera `phone-cam` is created on the machine, and `viam-server` is installed on Shrav's Mac (`viam-server -config ~/viam-shrav-mac.json`; the file holds the part secret and is not in the repo). The feed is available to the team while that runs. Final mount settings: [`config/phone_mount.yaml`](../config/phone_mount.yaml) (`rotate: 270`, measured book corners). Installing `viam-server` with Homebrew failed with "already locked …/openssl@3" until `ffmpeg` was upgraded first: `brew upgrade ffmpeg`, then `HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1 brew install viamrobotics/brews/viam-server`.
+
+**2. Put it in Viam as a sub-part of the machine (already done, for reference):**
 1. app.viam.com → the machine → **CONFIGURE** → **+** → **Sub-part**, named for example `shrav-mac`.
 2. Install and start `viam-server` on the Mac using the setup instructions the app shows for the sub-part (Homebrew `viam-server`, run with the downloaded config). Allow it camera access.
 3. On the sub-part, add a **camera** component, model **`webcam`**. Pick the iPhone as the video device and name it `phone-cam`.
