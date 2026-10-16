@@ -20,6 +20,7 @@ Three owners, three parts of the codebase. Each person owns their folder and ope
 | V6 | **Corner detection to guide the eraser**: book outline → right-page corner in book mm | `vision/page_detect.py` | the corner lands within 5 mm of a ruler measurement |
 | V7 | Flip verification thresholds from real flip / no-flip / double-flip images | `vision/verify.py` | catches every double flip in a 20-flip test |
 | V9 | **Depth stream** (the `cam` is RGB-D): measure the page surface height before each flip (replaces the `z_drop_per_flip_mm` guess) and the curl near the spine | `hardware/viam_robot.py` → new `capture_depth()`, `vision/` | the measured page height is within 1 mm of a touch-off |
+| V10 | **Pencil/gripper mask** (`calibrate-tool-mask`) and **lighting**: illumination flattening, glare % in the bench, pick a lamp position with the team | `vision/tool_mask.py`, `preprocess.py` | no pencil pixels in page crops; glare < 1 % at the capture poses |
 | V8 | Scan quality for archival mode: 300 dpi warp, white balance, optional curl dewarping near the spine (stretch) | `preprocess.py` | pages look like a flatbed scan |
 
 ## 🟩 Teammate B — CAD + motion software

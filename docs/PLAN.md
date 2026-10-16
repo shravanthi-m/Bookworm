@@ -44,7 +44,7 @@ Owners: **S** = Shrav (vision), **B** = CAD + motion, **C** = platform + modes.
 
 **Checkpoint:** reads 5 spreads hands-off, and scans 10 spreads to a PDF.
 
-## Sprint 5 — Demo polish
+## Sprint 5 — Demo polish (see [DEMO.md](DEMO.md) for the 2-minute script and time budget)
 - [ ] 10-spread rehearsal of each mode; fix the top failure.
 - [ ] **C:** backup demo with `--images` and recorded photos; README results; video.
 - [ ] **S (stretch):** curl dewarping for scan quality (V8).

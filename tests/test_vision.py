@@ -165,3 +165,39 @@ def test_bench_on_photo_folder(tmp_path):
     assert summary["images"] == 2 and summary["mean_word_accuracy"] == 1.0
     assert (tmp_path / "out" / "a.panel.jpg").exists()
     assert "flip_vs_previous" in bench.results[1]
+
+
+def test_flatten_illumination_evens_out_shadow():
+    from bookworm.vision.preprocess import flatten_illumination
+
+    gray = cv2.cvtColor(make_spread(), cv2.COLOR_BGR2GRAY).astype(np.float32)
+    shaded = (gray * np.linspace(0.45, 1.0, gray.shape[1])[None, :]).astype(np.uint8)   # dark on the left
+    flat = flatten_illumination(shaded)
+    paper_l, paper_r = flat[600:650, 100:300].mean(), flat[600:650, 1300:1500].mean()
+    assert abs(paper_l - paper_r) < 15 < abs(shaded[600:650, 100:300].mean() - shaded[600:650, 1300:1500].mean())
+
+
+def test_tool_mask_finds_static_pencil():
+    from bookworm.vision.tool_mask import build_tool_mask
+
+    rng = np.random.default_rng(0)
+    frames = []
+    for _ in range(5):
+        f = rng.integers(0, 255, (360, 640, 3), dtype=np.uint8)              # a different scene each time
+        cv2.rectangle(f, (600, 150), (639, 359), (40, 160, 220), -1)        # pencil from the right edge
+        frames.append(f)
+    mask = build_tool_mask(frames, dilate_px=0)
+    assert mask[250, 620] == 255 and mask[50, 50] == 0
+    assert 0.02 < (mask > 0).mean() < 0.06
+
+
+def test_tool_mask_applied_in_process_shot(tmp_path):
+    from bookworm.vision.preprocess import apply_tool_mask
+
+    img = make_spread()
+    cv2.rectangle(img, (1500, 300), (1599, 700), (0, 0, 0), -1)             # black "pencil"
+    m = np.zeros(img.shape[:2], np.uint8)
+    m[290:710, 1490:] = 255
+    cv2.imwrite(str(tmp_path / "m.png"), m)
+    out = apply_tool_mask(img, str(tmp_path / "m.png"))
+    assert out[500, 1550].mean() > 150                                       # painted over with paper

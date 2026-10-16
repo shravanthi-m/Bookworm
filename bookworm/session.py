@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import logging
 import time
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -40,6 +43,15 @@ class RunSummary:
     spreads: int = 0
     flips: dict = field(default_factory=dict)   # FlipOutcome.value -> count
     stopped_because: str = ""
+    seconds: float = 0.0
+    timing: dict = field(default_factory=dict)  # stage -> {"n", "mean_s", "total_s"}
+
+    def timing_table(self) -> str:
+        rows = [f"{'stage':<12}{'n':>4}{'mean s':>9}{'total s':>9}"]
+        for stage, t in sorted(self.timing.items(), key=lambda kv: -kv[1]["total_s"]):
+            rows.append(f"{stage:<12}{t['n']:>4}{t['mean_s']:>9.2f}{t['total_s']:>9.1f}")
+        rows.append(f"{'wall clock':<12}{'':>4}{'':>9}{self.seconds:>9.1f}")
+        return "\n".join(rows)
 
 
 class BookSession:
@@ -48,17 +60,29 @@ class BookSession:
         self.mcfg = cfg["modes"][mode]
         self.book = BookFrame.from_config(cfg["book"])
         self.flips_done = 0
+        self.times: dict[str, list[float]] = defaultdict(list)
+        self.pool = ThreadPoolExecutor(max_workers=4)   # tesseract runs as subprocesses -> real parallelism
         self.run_dir = None
         if cfg["run"].get("save_dir"):
             self.run_dir = Path(cfg["run"]["save_dir"]) / f"{time.strftime('%Y%m%d-%H%M%S')}-{mode}"
             self.run_dir.mkdir(parents=True, exist_ok=True)
 
+    @contextmanager
+    def _timed(self, stage: str):
+        t0 = time.perf_counter()
+        try:
+            yield
+        finally:
+            self.times[stage].append(time.perf_counter() - t0)
+
     # ---- capture ------------------------------------------------------------
     def _goto(self, pose_name: str) -> None:
         pose = self.cfg["poses"].get(pose_name)
         if pose:
-            self.robot.move_to(pose)
-            time.sleep(self.cfg["vision"]["settle_s"])
+            with self._timed("move"):
+                self.robot.move_to(pose)
+            with self._timed("settle"):
+                time.sleep(self.cfg["vision"]["settle_s"])
         elif self.cfg["robot"]["backend"] == "viam":
             raise HardwareError(f"pose '{pose_name}' not set — run: python -m bookworm save-pose {pose_name}")
 
@@ -79,23 +103,31 @@ class BookSession:
         bcfg, ppm = self.cfg["book"], self.mcfg["px_per_mm"]
         for shot in self.mcfg["shots"]:
             self._goto(shot["pose"])
-            frame = self._capture_sharp()
-            geom = self.robot.camera_geometry() if self.book else None
+            with self._timed("capture"):
+                frame = self._capture_sharp()
+                geom = self.robot.camera_geometry() if self.book else None
+            t0 = time.perf_counter()
             quad = size = None
             if geom is not None:
                 quad_mm = page_quad(shot["region"], bcfg["page_width_mm"], bcfg["page_height_mm"])
                 quad = book_quad_pixels(self.book, geom, quad_mm)
                 size = ((quad_mm[1, 0] - quad_mm[0, 0]) * ppm, bcfg["page_height_mm"] * ppm)
             pages.update(process_shot(frame, shot["region"], self.cfg["vision"], quad, size))
+            self.times["preprocess"].append(time.perf_counter() - t0)
             shots.append(Shot(shot["region"], frame, geom))
-        return Spread(pages, shots, self._page_number(pages))
+        with self._timed("page_no"):
+            page_no = self._page_number(pages)
+        return Spread(pages, shots, page_no)
 
     def _page_number(self, pages) -> int | None:
         frac = self.cfg["vision"]["page_number_region"]
-        if "left" in pages and (n := self.ocr.page_number(pages["left"].binary, frac)) is not None:
-            return n
-        if "right" in pages and (n := self.ocr.page_number(pages["right"].binary, frac)) is not None:
-            return n - 1
+        futs = {s: self.pool.submit(self.ocr.page_number, pages[s].binary, frac)
+                for s in ("left", "right") if s in pages}
+        nums = {s: f.result() for s, f in futs.items()}
+        if nums.get("left") is not None:
+            return nums["left"]
+        if nums.get("right") is not None:
+            return nums["right"] - 1
         return None
 
     # ---- flip ---------------------------------------------------------------
@@ -116,7 +148,9 @@ class BookSession:
             raise HardwareError("book frame not calibrated — run: python -m bookworm calibrate-book")
         after = None
         for attempt in range(self.cfg["verify"]["max_flip_retries"] + 1):
-            run_flip(self.robot, book, self.cfg, self._corner(after or before), self.flips_done)
+            corner = self._corner(after or before)
+            with self._timed("flip"):
+                run_flip(self.robot, book, self.cfg, corner, self.flips_done)
             if hasattr(self.robot, "simulate_page_turn"):
                 self.robot.simulate_page_turn()
             if getattr(getattr(self.robot, "camera", None), "exhausted", False):
@@ -143,15 +177,31 @@ class BookSession:
         (self.run_dir / f"spread{i:03d}.txt").write_text("\n\n".join(lines) + "\n")
 
     def run(self, max_spreads: int | None = None) -> RunSummary:
+        t_start = time.perf_counter()
+        try:
+            summary = self._run(max_spreads)
+        finally:
+            self.pool.shutdown(wait=False)
+        summary.seconds = time.perf_counter() - t_start
+        summary.timing = {k: {"n": len(v), "mean_s": sum(v) / len(v), "total_s": sum(v)}
+                          for k, v in self.times.items() if v}
+        log.info("summary: %s", summary)
+        print(summary.timing_table())
+        return summary
+
+    def _run(self, max_spreads: int | None) -> RunSummary:
         summary = RunSummary()
         if self.cfg["poses"].get("home"):
             self.robot.move_to(self.cfg["poses"]["home"])
         spread = self.capture_spread()
         blanks = 0
         while True:
-            results = {side: self.ocr.read(page.binary) for side, page in spread.pages.items()}
+            with self._timed("ocr"):
+                futs = {side: self.pool.submit(self.ocr.read, page.binary) for side, page in spread.pages.items()}
+                results = {side: f.result() for side, f in futs.items()}
             self._save_debug(summary.spreads, spread, results)
-            self.handler.on_spread(summary.spreads, spread, results)
+            with self._timed("handler"):
+                self.handler.on_spread(summary.spreads, spread, results)
             summary.spreads += 1
 
             min_words = self.cfg["ocr"]["min_words_for_text"]
@@ -178,6 +228,6 @@ class BookSession:
 
         if self.cfg["poses"].get("home"):
             self.robot.move_to(self.cfg["poses"]["home"])
-        self.handler.finish(summary)
-        log.info("summary: %s", summary)
+        with self._timed("finish"):
+            self.handler.finish(summary)        # read mode: waits for speech to end
         return summary

@@ -47,7 +47,7 @@ tests/                run without the arm, Viam, or a camera
 git clone https://github.com/shravanthi-m/Bookworm.git && cd Bookworm
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-brew install tesseract          # macOS   |  sudo apt install tesseract-ocr espeak  (Linux)
+brew install tesseract          # macOS   |  sudo apt install tesseract-ocr espeak-ng  (Linux)
 cp .env.example .env            # then paste in the Viam API key (below)
 pytest                          # should pass with no hardware
 ```
@@ -135,7 +135,7 @@ Ground truth is optional. Put `photo.left.txt` / `photo.right.txt` next to `phot
 | CAD + motion software | _Teammate B_ | [DIVISION.md § Teammate B](docs/DIVISION.md#-teammate-b--cad--motion-software) |
 | Platform, modes & demo | _Teammate C_ | [DIVISION.md § Teammate C](docs/DIVISION.md#-teammate-c--platform-modes--demo) |
 
-Sprint plan: [docs/PLAN.md](docs/PLAN.md).
+Sprint plan: [docs/PLAN.md](docs/PLAN.md) · 2-minute demo plan and latency budget: [docs/DEMO.md](docs/DEMO.md).
 
 ## Results
 

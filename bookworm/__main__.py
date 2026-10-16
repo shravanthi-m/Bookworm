@@ -9,6 +9,7 @@ Setup / calibration (writes config/local.yaml)
     pencil                 open gripper, insert pencil, grab
     save-pose NAME         store the arm's current pose (home, overview, scan_left, scan_right)
     calibrate-book         touch the eraser to 3 book points to define the book frame
+    calibrate-tool-mask    mask the pencil out of the wrist camera (frames from a few views)
     overlay POSE           move to POSE, draw the projected book outline -> runs/overlay.jpg
 
 Development
@@ -49,7 +50,8 @@ def _run_mode(cfg, args, mode, handler_factory):
     robot, close = build_robot(cfg, images_dir=args.images, mock=args.mock)
     try:
         session = BookSession(robot, TesseractOcr(**cfg["ocr"]), handler_factory(), cfg, mode)
-        print(session.run(max_spreads=args.max_spreads))
+        s = session.run(max_spreads=args.max_spreads)
+        print(f"{s.spreads} spreads, flips {s.flips}, stopped: {s.stopped_because}")
     except KeyboardInterrupt:
         print("\ninterrupted")
     finally:
@@ -151,6 +153,37 @@ def cmd_calibrate_book(cfg, args):
     finally:
         close()
     _save_local({"book": points})
+
+
+def cmd_calibrate_tool_mask(cfg, args):
+    """Mask the pencil/gripper out of wrist-camera frames. Never moves the arm."""
+    from .vision import FileCamera
+    from .vision.tool_mask import build_tool_mask, preview
+
+    if args.images:
+        frames = [cv2.imread(str(p)) for p in FileCamera(args.images).paths]
+    else:
+        from .hardware.viam_robot import ViamConnection, ViamRobot
+
+        conn = ViamConnection()
+        frames = []
+        try:
+            robot = ViamRobot(conn, **cfg["robot"])
+            print("Capture views that look DIFFERENT (move the arm in the Viam app, or slide paper /"
+                  " objects under the camera). The pencil must stay in the gripper.")
+            for i in range(args.frames):
+                input(f"[{i + 1}/{args.frames}] change the view, then press Enter...")
+                frames.append(robot.capture())
+        finally:
+            conn.close()
+    mask = build_tool_mask(frames)
+    out = Path(__file__).resolve().parent.parent / "config" / "tool_mask.png"
+    cv2.imwrite(str(out), mask)
+    Path("runs").mkdir(exist_ok=True)
+    cv2.imwrite("runs/tool_mask_preview.jpg", preview(frames[-1], mask))
+    print(f"mask covers {100 * (mask > 0).mean():.1f}% of the frame -> {out}")
+    print("check runs/tool_mask_preview.jpg: the pencil (and only the pencil) should be red")
+    _save_local({"vision": {"tool_mask": str(out)}})
 
 
 def cmd_overlay(cfg, args):
@@ -280,6 +313,9 @@ def main(argv=None):
     sp = sub.add_parser("save-pose")
     sp.add_argument("name")
     sub.add_parser("calibrate-book")
+    tm = sub.add_parser("calibrate-tool-mask", help="mask the pencil out of wrist-camera frames")
+    tm.add_argument("--images", help="folder of wrist-camera frames from different views")
+    tm.add_argument("--frames", type=int, default=6)
     ov = sub.add_parser("overlay")
     ov.add_argument("pose", nargs="?", default="overview")
     vb = sub.add_parser("vision", help="vision-only test bench (no arm motion)")
@@ -303,6 +339,7 @@ def main(argv=None):
     cfg = load_config(args.config or (LOCAL_CFG if LOCAL_CFG.exists() else None))
     handlers = {"read": cmd_read, "scan": cmd_scan, "check": cmd_check, "pencil": cmd_pencil,
                 "save-pose": cmd_save_pose, "calibrate-book": cmd_calibrate_book,
+                "calibrate-tool-mask": cmd_calibrate_tool_mask,
                 "overlay": cmd_overlay, "vision": cmd_vision, "ocr": cmd_ocr, "flip": cmd_flip}
     handlers[args.cmd](cfg, args)
 

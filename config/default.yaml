@@ -61,6 +61,9 @@ vision:
   # and they are masked automatically (HSV, OpenCV H 0-179). null disables.
   clamp_color_hsv: [[40, 80, 60], [85, 255, 255]]   # bright green
   clamp_masks: []           # extra fixed rectangles [x0, y0, x1, y1], normalised spread coords
+  # Pencil/gripper mask in wrist-camera pixels (the tool is fixed relative to the camera).
+  # Build with: python -m bookworm calibrate-tool-mask   (writes the path into config/local.yaml)
+  tool_mask: null
   page_number_region: 0.08  # bottom/top fraction of each page searched for page number
   corner_search_mm: 25      # vision corner must be within this of the calibrated corner
 
@@ -76,8 +79,9 @@ verify:
   max_flip_retries: 2
 
 speech:
-  engine: pyttsx3           # pyttsx3 | print
-  rate: 170
+  engine: system            # system (macOS `say` / Linux espeak-ng, spoken in background) | print
+  rate: 170                 # words per minute
+  voice: null               # e.g. "Samantha" on macOS (`say -v '?'` lists voices)
 
 flip:
   use_vision_corner: true   # refine the page corner from the image before each flip

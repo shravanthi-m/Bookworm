@@ -20,7 +20,7 @@ import numpy as np
 
 from .geometry import book_quad_pixels
 from .page_detect import find_paper_corners, locate_right_corner
-from .preprocess import process_shot, sharpness
+from .preprocess import glare_fraction, process_shot, sharpness
 from .verify import classify_flip
 
 
@@ -74,6 +74,7 @@ class VisionBench:
 
         rec = {"image": name, "sharpness": round(sharpness(frame), 1),
                "sharp_ok": sharpness(frame) >= v["min_sharpness"],
+               "glare_pct": round(100 * glare_fraction(frame), 2),
                "geometry": quad is not None, "pages": {}}
         outline = find_paper_corners(frame)
         rec["outline_found"] = outline is not None
@@ -114,6 +115,7 @@ class VisionBench:
                           for s, p in rec["pages"].items())
         flip = f"  flip={rec['flip_vs_previous']}" if "flip_vs_previous" in rec else ""
         print(f"{rec['image']}: sharp {rec['sharpness']}{'' if rec['sharp_ok'] else ' (BLURRY)'}  "
+              f"glare {rec['glare_pct']}%  "
               f"{pages}{flip}  [{rec['ms_preprocess']}+{rec['ms_ocr']} ms]")
 
     def report(self) -> dict:

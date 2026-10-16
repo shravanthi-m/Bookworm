@@ -115,3 +115,25 @@ def test_flip_waypoints_follow_book_frame_and_corner():
 def test_tip_to_flange_points_tool_down():
     rcfg = {"tool_length_mm": 190, "tip_orientation": {"o_x": 0, "o_y": 0, "o_z": -1, "theta": 0}}
     assert tip_to_flange([1, 2, 3], rcfg) == {"x": 1, "y": 2, "z": 193, "o_x": 0, "o_y": 0, "o_z": -1, "theta": 0}
+
+
+def test_background_speaker_overlaps_with_work():
+    import time
+
+    from bookworm.speech import BackgroundSpeaker
+
+    spoken = []
+    sp = BackgroundSpeaker(lambda t: (time.sleep(0.2), spoken.append(t)))
+    t0 = time.perf_counter()
+    for w in ("one", "two", "three"):
+        sp.say(w)
+    assert time.perf_counter() - t0 < 0.1          # say() doesn't block -> arm can flip meanwhile
+    sp.wait()
+    assert spoken == ["one", "two", "three"] and time.perf_counter() - t0 >= 0.6
+
+
+def test_summary_has_timing():
+    session, _, _ = make_session([(2, WORDS), (4, WORDS)])
+    summary = session.run()
+    assert {"ocr", "flip", "capture"} <= set(summary.timing)
+    assert "wall clock" in summary.timing_table()

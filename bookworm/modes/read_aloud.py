@@ -1,4 +1,8 @@
-"""Read-aloud mode: speak each page as the robot turns through the book."""
+"""Read-aloud mode: speak each page as the robot turns through the book.
+
+Speech is queued on a background thread, so on_spread returns immediately and the
+arm flips the next page while this one is still being read aloud.
+"""
 from __future__ import annotations
 
 MESSAGES = {
@@ -28,3 +32,4 @@ class ReadAloud:
 
     def finish(self, summary):
         self.speaker.say("The end." if summary.stopped_because == "end of book" else "Stopping here.")
+        self.speaker.wait()

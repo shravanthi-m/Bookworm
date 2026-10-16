@@ -58,10 +58,50 @@ def mask_color(img: np.ndarray, hsv_range) -> np.ndarray:
     return out
 
 
+def flatten_illumination(gray: np.ndarray) -> np.ndarray:
+    """Divide out the lighting gradient (shadows, arm shadow, one-sided lamp).
+
+    A grayscale closing with a kernel larger than the text strokes erases the text and
+    leaves the paper's brightness map; dividing by it makes the paper uniformly white.
+    """
+    small = cv2.resize(gray, None, fx=0.25, fy=0.25, interpolation=cv2.INTER_AREA)
+    bg = cv2.morphologyEx(small, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15)))
+    bg = cv2.GaussianBlur(bg, (0, 0), 3)
+    bg = cv2.resize(bg, (gray.shape[1], gray.shape[0]), interpolation=cv2.INTER_LINEAR)
+    return cv2.divide(gray, np.maximum(bg, 1), scale=255)
+
+
+def glare_fraction(img: np.ndarray) -> float:
+    """Share of pixels blown out by specular glare (very bright, colourless). Text there is lost."""
+    if img.ndim != 3:
+        return float((img >= 250).mean())
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    return float(((hsv[..., 2] >= 250) & (hsv[..., 1] <= 25)).mean())
+
+
+_mask_cache: dict = {}
+
+
+def apply_tool_mask(frame: np.ndarray, mask_path: str | None) -> np.ndarray:
+    """Paint over the pencil/gripper (fixed in wrist-camera pixels) using a calibrated mask.
+
+    Inpainting keeps colour scans looking clean; OCR sees plain paper there.
+    """
+    if not mask_path:
+        return frame
+    key = (mask_path, frame.shape[:2])
+    if key not in _mask_cache:
+        m = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+        if m is None:
+            raise FileNotFoundError(f"tool mask not found: {mask_path} (run: python -m bookworm calibrate-tool-mask)")
+        _mask_cache[key] = cv2.resize(m, (frame.shape[1], frame.shape[0]), interpolation=cv2.INTER_NEAREST)
+    return cv2.inpaint(frame, _mask_cache[key], 5, cv2.INPAINT_TELEA)
+
+
 def prepare_for_ocr(page: np.ndarray) -> np.ndarray:
-    """Grayscale + contrast normalisation + binarisation; tolerant of uneven lighting."""
+    """Grayscale -> flatten lighting -> denoise -> binarise."""
     gray = cv2.cvtColor(page, cv2.COLOR_BGR2GRAY) if page.ndim == 3 else page
-    gray = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
+    gray = flatten_illumination(gray)
     gray = cv2.medianBlur(gray, 3)
     return cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 15)
 
@@ -73,6 +113,7 @@ def process_shot(frame: np.ndarray, region: str, vcfg: dict, quad_px=None, size=
     into the image, so the warp is exact. Without it (photos, mock), the frame is treated
     as a whole spread using the clicked ``book_corners`` (or the full frame).
     """
+    frame = apply_tool_mask(frame, vcfg.get("tool_mask"))
     if quad_px is not None:
         img = warp_quad(frame, quad_px, size)
         is_spread = region == "spread"
