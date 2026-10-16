@@ -100,8 +100,11 @@ class ViamRobot(Robot):
 
     # ---- camera -------------------------------------------------------------
     def capture(self):
-        images, _ = self.conn.call(self.cam.get_images())
-        # RGB-D camera: returns 'color' (jpeg) and 'depth' (vnd.viam.dep); take the colour one.
+        # RealSense returns 'color' (jpeg, ~70 KB) and 'depth' (~1.8 MB). Asking for colour only
+        # cut capture from ~485 ms to ~31 ms on the rig.
+        images, _ = self.conn.call(self.cam.get_images(filter_source_names=["color"]))
+        if not images:
+            images, _ = self.conn.call(self.cam.get_images())
         color = [im for im in images if not im.mime_type.startswith("image/vnd.viam.dep")]
         if not color:
             raise HardwareError("wrist camera returned no colour image")

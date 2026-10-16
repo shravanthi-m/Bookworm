@@ -4,11 +4,13 @@
 
 | Part | Viam component (config key) | Used for |
 |------|-----------------------------|----------|
-| uFactory arm | `arm` (`robot.arm`) | moving the camera to capture poses and moving the pencil to flip pages |
+| uFactory xArm 850 (`viam:ufactory:xArm850`) | `arm` (`robot.arm`) | moving the camera to capture poses and moving the pencil to flip pages |
 | Gripper | `gripper` (`robot.gripper`) | holding the pencil, eraser end down |
-| Calibrated wrist camera (RGB-D) | `cam` (`robot.camera`) | colour + depth streams; intrinsics (fx≈fy≈906 px at 1280×720) and frame (parent = `arm`) map pixels to world mm |
+| Intel RealSense wrist camera (`viam:camera:realsense`) | `cam` (`robot.camera`) | colour 1280×720 + aligned depth; intrinsics (fx≈fy≈906 px, ~70° HFOV) and frame (parent = `arm`) map pixels to world mm. We request the colour stream only (31 ms vs 485 ms with depth) |
 
 Everything is reached through Viam API calls, using the API key in `.env`. Nothing else is wired up: **no servos, no microcontroller**. If the component names in the Viam app are different, set them in `config/local.yaml`. Then run `python -m bookworm check` to confirm the connection, camera intrinsics and camera pose.
+
+Arm, gripper and camera come from the shared fragment `xarm850-realsense-original` (camera attributes: `width_px: 1280, height_px: 720, sensors: [color, depth], align_color_depth: true`). **Don't edit the shared fragment** — it's used by other machines. To change camera settings for this machine only, use a *fragment mod* on this machine in the Viam app.
 
 Also on the machine: the `builtin` motion service with obstacle geometries (`table`, `ceiling`, `wall-front`, `wall-side`), a `gripper` frame 105 mm out from the flange, a `pencil` generic component and a `home-pose` switch. *Verified 2026-10-16 with `bookworm check`.*
 
