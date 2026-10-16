@@ -19,7 +19,7 @@ from pathlib import Path
 import cv2
 
 from ..modes import Scanner, excerpt
-from ..session import RunSummary, Spread
+from ..session import RunSummary, Spread, best_of_frames
 from ..speech import make_speaker
 from ..vision import make_ocr, ocr_image, process_shot
 from ..vision.preprocess import rotate_frame
@@ -93,16 +93,20 @@ class Controller:
 
     def _spread(self) -> Spread:
         time.sleep(0.4)                        # let the feed catch up after a flip
-        with self.lock:
-            frame = None if self.frame is None else self.frame.copy()
-        if frame is None:
+        frames = []
+        for _ in range(max(1, int(self.cfg["ocr"].get("frames", 1)))):
+            with self.lock:
+                if self.frame is not None:
+                    frames.append(self.frame.copy())
+            time.sleep(self.cfg["ocr"].get("frame_gap_s", 0.3))
+        if not frames:
             raise RuntimeError("no camera frame yet")
-        v = dict(self.cfg["vision"], rotate=0)  # frame is already upright
-        pages = process_shot(frame, "spread", v)
+        v = dict(self.cfg["vision"], rotate=0)  # frames are already upright
+        pages, results = best_of_frames(frames, "spread", v, self.ocr)
         frac = v["page_number_region"]
         left = self.ocr.page_number(ocr_image(self.ocr, pages["left"]), frac)
         right = self.ocr.page_number(ocr_image(self.ocr, pages["right"]), frac) if left is None else None
-        return Spread(pages, [], left if left is not None else (right - 1 if right else None))
+        return Spread(pages, [], left if left is not None else (right - 1 if right else None), results)
 
     # ---- actions ---------------------------------------------------------------
     def start(self, name: str) -> bool:
@@ -143,7 +147,7 @@ class Controller:
         self.state["status"] = "Reading…"
         spread = self._spread()
         r = self.cfg["modes"]["read"]
-        parts = [excerpt(self.ocr.read(ocr_image(self.ocr, spread.pages[s])).text, r.get("max_words_per_page"),
+        parts = [excerpt(spread.results[s].text, r.get("max_words_per_page"),
                          r.get("min_sentence_quality", 0.95)) for s in r["read_order"]]
         text = " ".join(p for p in parts if p) or "(nothing clear enough to read)"
         self.state["text"] = text
@@ -154,7 +158,7 @@ class Controller:
     def _scan(self):
         self.state["status"] = "Scanning…"
         spread = self._spread()
-        results = {s: self.ocr.read(ocr_image(self.ocr, p)) for s, p in spread.pages.items()}
+        results = spread.results
         self.scanner.on_spread(len(self.scanner.pages) // 2, spread, results)
         self.scanner.finish(RunSummary(spreads=len(self.scanner.pages) // 2, stopped_because="ui"))
         self.state.update(pages=len(self.scanner.pages), pdf=True,
