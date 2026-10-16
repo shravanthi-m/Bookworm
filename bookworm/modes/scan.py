@@ -66,7 +66,7 @@ class Scanner:
         try:
             build_pdf(self.out, searchable=self.cfg["modes"]["scan"].get("searchable_pdf", True),
                       lang=o["lang"], psm=o["psm"], page_width_mm=self.cfg["book"]["page_width_mm"],
-                      ocr_input=self.cfg["vision"].get("ocr_input", "gray"))
+                      ocr_input=self.cfg["vision"].get("ocr_input", "gray"), engine=o.get("engine", "auto"))
         except Exception as e:  # noqa: BLE001 - never lose a scan over the PDF; pages + text are saved
             print(f"[scan] searchable PDF failed ({e}); writing image-only PDF")
             from PIL import Image

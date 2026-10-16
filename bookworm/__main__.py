@@ -390,7 +390,7 @@ def cmd_pdf(cfg, args):
 
     build_pdf(args.scan_dir, args.out, searchable=not args.no_text, lang=cfg["ocr"]["lang"],
               psm=cfg["ocr"]["psm"], page_width_mm=cfg["book"]["page_width_mm"],
-              ocr_input=cfg["vision"].get("ocr_input", "gray"))
+              ocr_input=cfg["vision"].get("ocr_input", "gray"), engine=cfg["ocr"].get("engine", "auto"))
 
 
 def cmd_ui(cfg, args):

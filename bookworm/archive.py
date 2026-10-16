@@ -4,9 +4,9 @@ copied from, and read by other tools.
 
     python -m bookworm pdf scans/mybook            -> scans/mybook/book.pdf
 
-The text layer comes from Tesseract run on our preprocessed page (lighting-flattened +
-sharpened — far better than OCR on the raw colour image), rendered as a text-only PDF and
-overlaid on the colour image page at the same size.
+The text layer comes from Apple Vision on macOS (line boxes -> invisible text via
+reportlab), else Tesseract on our preprocessed page; either is rendered as a text-only
+PDF page and overlaid on the colour image page at the same size.
 """
 from __future__ import annotations
 
@@ -47,9 +47,33 @@ def _text_layer(ocr_img: np.ndarray, dpi: int, lang: str, psm: int) -> bytes:
         ocr_img, extension="pdf", lang=lang, config=f"--psm {psm} --dpi {dpi} -c textonly_pdf=1")
 
 
+def _apple_text_layer(img: np.ndarray, dpi: int, apple) -> bytes:
+    """Text-only PDF page from Apple Vision: each recognised line drawn invisibly (render
+    mode 3) over its box, stretched to the box width so selection lines up with the print."""
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+    from reportlab.pdfgen import canvas
+
+    w_pt, h_pt = img.shape[1] / dpi * 72, img.shape[0] / dpi * 72
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=(w_pt, h_pt))
+    for text, _conf, (x, y, w, h) in apple._lines(img):     # normalised, origin bottom-left = PDF's
+        size = max(1.0, h * h_pt * 0.9)
+        width = stringWidth(text, "Helvetica", size)
+        t = c.beginText(x * w_pt, y * h_pt + h * h_pt * 0.15)
+        t.setTextRenderMode(3)                               # invisible, but searchable/selectable
+        t.setFont("Helvetica", size)
+        if width > 0:
+            t.setHorizScale(100.0 * w * w_pt / width)
+        t.textOut(text)
+        c.drawText(t)
+    c.showPage()
+    c.save()
+    return buf.getvalue()
+
+
 def build_pdf(scan_dir: str | Path, out: str | Path | None = None, searchable: bool = True,
               lang: str = "eng", psm: int = 3, page_width_mm: float | None = None,
-              ocr_input: str = "gray") -> Path:
+              ocr_input: str = "gray", engine: str = "auto") -> Path:
     """Write a (searchable) PDF of every page in ``scan_dir``. Returns the PDF path."""
     from pypdf import PdfReader, PdfWriter
 
@@ -62,17 +86,30 @@ def build_pdf(scan_dir: str | Path, out: str | Path | None = None, searchable: b
     if not pages:
         raise FileNotFoundError(f"no pages in {scan_dir}/pages")
 
+    apple = None
+    if searchable and engine in ("auto", "apple"):
+        try:                                                 # better text layer on macOS
+            import reportlab  # noqa: F401
+
+            from .vision.ocr import AppleVisionOcr
+
+            apple = AppleVisionOcr()
+        except ImportError:
+            apple = None
+
     writer = PdfWriter()
     for i, path in enumerate(pages, 1):
         img = read_image(path)
         dpi = _dpi(img, page_width_mm)
         page = writer.add_page(PdfReader(io.BytesIO(_image_page(img, dpi))).pages[0])
         if searchable:
-            text = PdfReader(io.BytesIO(_text_layer(prepare_for_ocr(img, ocr_input), dpi, lang, psm))).pages[0]
-            page.merge_page(text)                    # same pixels + same dpi -> same page size
+            layer = (_apple_text_layer(img, dpi, apple) if apple is not None
+                     else _text_layer(prepare_for_ocr(img, ocr_input), dpi, lang, psm))
+            page.merge_page(PdfReader(io.BytesIO(layer)).pages[0])   # same pixels + dpi -> same size
         print(f"\r[pdf] page {i}/{len(pages)}", end="", flush=True)
     writer.add_metadata({"/Producer": "Bookworm", "/Title": scan_dir.name})
     with open(out, "wb") as f:
         writer.write(f)
-    print(f"\n[pdf] {'searchable ' if searchable else ''}PDF -> {out}")
+    kind = "searchable (Apple Vision) " if apple else ("searchable (Tesseract) " if searchable else "")
+    print(f"\n[pdf] {kind}PDF -> {out}")
     return out
