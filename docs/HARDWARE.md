@@ -57,6 +57,9 @@ macOS asks for camera permission the first time (System Settings → Privacy & S
 **3. Point Bookworm at it** in `config/local.yaml`:
 ```yaml
 robot: {camera: phone-cam, camera_calibrated: false}
+vision: {rotate: 270}              # whatever `vision --webcam N` suggests for your mount
+modes:
+  scan: {shots: [{pose: overview, region: spread}]}   # fixed camera: one shot per spread, arm parked
 ```
 Then:
 - `python -m bookworm calibrate-view`: click the spread's four corners once. The phone and book must not move after this.
