@@ -184,3 +184,16 @@ def test_searchable_pdf_has_text_layer(tmp_path):
     assert "brown fox" in text and "spinoza" in text
     w_in = float(reader.pages[0].mediabox.width) / 72
     assert abs(w_in - 140 / 25.4) < 0.1                                     # real page size
+
+
+def test_excerpt_skips_garbled_ocr_and_headers():
+    from bookworm.modes import excerpt
+
+    ocr = ("200 : JOSTEIN GAARDER\n\n"
+           "So nature is not a dream after all. "
+           "Wag dot pat web tha bark eet Leber gee en de od he fe. "
+           "For example, only man has a mind. "
+           "Are we automatons as well?")
+    out = excerpt(ocr, 30)
+    assert out == "So nature is not a dream after all. For example, only man has a mind. Are we automatons as well?"
+    assert excerpt("Xq zzv brrp. Qwt plk mnnb.", 30) == ""          # nothing clean -> stay quiet
