@@ -30,7 +30,16 @@ class ViamConnection:
 
         self.loop = asyncio.new_event_loop()
         threading.Thread(target=self.loop.run_forever, daemon=True).start()
-        self.machine = self.call(self._connect(key_id, key))
+        # Dialing the cloud machine is flaky (some routes time out after ~20 s each), so
+        # give each attempt time and retry instead of failing on the first slow dial.
+        last = None
+        for _ in range(3):
+            try:
+                self.machine = self.call(self._connect(key_id, key), timeout=90)
+                return
+            except Exception as e:  # noqa: BLE001 - TimeoutError / connection errors from the SDK
+                last = e
+        raise HardwareError(f"could not connect to {self.address}: {last!r}")
 
     async def _connect(self, key_id, key):
         from viam.robot.client import RobotClient

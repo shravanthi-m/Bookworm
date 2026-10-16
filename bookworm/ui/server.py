@@ -29,6 +29,34 @@ ACTIONS = {"flip": ["flip"], "read": ["read"], "scan": ["scan"],
            "flip_read": ["flip", "read"], "flip_scan": ["flip", "scan"]}
 
 
+class LazyViamCamera:
+    """Connects to Viam in the background so the page opens immediately."""
+
+    def __init__(self, cfg: dict):
+        self.cfg, self.robot, self.conn, self.error = cfg, None, None, None
+        threading.Thread(target=self._connect, daemon=True).start()
+
+    def _connect(self):
+        from ..hardware.viam_robot import ViamConnection, ViamRobot
+
+        while self.robot is None:
+            try:
+                self.conn = ViamConnection()
+                self.robot = ViamRobot(self.conn, **self.cfg["robot"])
+            except Exception as e:  # noqa: BLE001 - keep retrying; shown on the page
+                self.error = e
+                time.sleep(3)
+
+    def capture(self):
+        if self.robot is None:
+            raise RuntimeError("connecting to camera…")
+        return self.robot.capture()
+
+    def close(self):
+        if self.conn:
+            self.conn.close()
+
+
 class Controller:
     def __init__(self, cfg: dict, camera, config_path: str | None, scan_dir: str):
         self.cfg, self.camera = cfg, camera
@@ -55,8 +83,11 @@ class Controller:
                                        [cv2.IMWRITE_JPEG_QUALITY, 75])
                 with self.lock:
                     self.frame, self.jpeg = f, buf.tobytes() if ok else self.jpeg
+                if self.state["status"].startswith(("Camera:", "Connecting")):
+                    self.state["status"] = "Ready"
             except Exception as e:  # noqa: BLE001 - keep the feed alive through network hiccups
-                self.state["status"] = f"Camera: {e}"
+                msg = str(e)
+                self.state["status"] = "Connecting to camera…" if "connecting" in msg else f"Camera: {msg}"
                 time.sleep(1)
             time.sleep(0.15)
 

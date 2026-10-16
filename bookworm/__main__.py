@@ -400,22 +400,20 @@ def cmd_ui(cfg, args):
 
     if args.quiet:
         cfg["speech"]["engine"] = "print"
-    conn = None
     if args.images:
         from .vision import FileCamera
 
         camera = FileCamera(args.images)
     else:
-        from .hardware.viam_robot import ViamConnection, ViamRobot
+        from .ui.server import LazyViamCamera
 
-        conn = ViamConnection()
-        camera = ViamRobot(conn, **cfg["robot"])
+        camera = LazyViamCamera(cfg)
     try:
         out = args.out or f"scans/{time.strftime('%Y%m%d-%H%M%S')}"
         serve(Controller(cfg, camera, args.config, out), args.port)
     finally:
-        if conn:
-            conn.close()
+        if hasattr(camera, "close"):
+            camera.close()
 
 
 def cmd_ocr(cfg, args):

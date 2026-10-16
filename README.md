@@ -26,8 +26,10 @@ Both share one loop:
 ## Control page
 
 ```bash
-python -m bookworm --config config/phone_mount.yaml ui      # http://localhost:8000
+./bookworm.sh --config config/phone_mount.yaml ui           # http://localhost:8000
 ```
+
+`./bookworm.sh` runs Bookworm with the project's `.venv` and clears any `PYTHONPATH` from other environments (a conda/ROS `PYTHONPATH` breaks numpy). Any `python -m bookworm …` command in this README works the same through it.
 
 Live feed plus Flip / Read / Scan, and Flip + Read / Flip + Scan. Flip runs `ui.flip_command` in the config, so any flip script can be plugged in.
 
@@ -54,8 +56,7 @@ tests/                run without the arm, Viam, or a camera
 
 ```bash
 git clone https://github.com/shravanthi-m/Bookworm.git && cd Bookworm
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # then use ./bookworm.sh
 brew install tesseract          # macOS   |  sudo apt install tesseract-ocr espeak-ng  (Linux)
 cp .env.example .env            # then paste in the Viam API key (below)
 pytest                          # should pass with no hardware
