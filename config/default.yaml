@@ -82,6 +82,7 @@ vision:
     stop_after: 3           # consecutive odd frames before STOP
 
 ocr:
+  engine: auto              # auto (Apple Vision on macOS, else Tesseract) | apple | tesseract
   lang: eng
   psm: 3                    # tesseract page segmentation mode (3 = auto, 6 = single block)
   min_word_conf: 50

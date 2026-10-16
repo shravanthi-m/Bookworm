@@ -54,11 +54,11 @@ def _save_local(updates: dict):
 def _run_mode(cfg, args, mode, handler_factory):
     from .rig import build_robot
     from .session import BookSession
-    from .vision import TesseractOcr
+    from .vision import make_ocr
 
     robot, close = build_robot(cfg, images_dir=args.images, mock=args.mock)
     try:
-        session = BookSession(robot, TesseractOcr(**cfg["ocr"]), handler_factory(), cfg, mode)
+        session = BookSession(robot, make_ocr(cfg["ocr"]), handler_factory(), cfg, mode)
         s = session.run(max_spreads=args.max_spreads)
         print(f"{s.spreads} spreads, flips {s.flips}, stopped: {s.stopped_because}")
     except KeyboardInterrupt:
@@ -327,7 +327,7 @@ def cmd_vision(cfg, args):
     import time
 
     from .hardware import BookFrame
-    from .vision import FileCamera, TesseractOcr
+    from .vision import FileCamera, make_ocr
     from .vision.bench import VisionBench
     from .vision.camera import read_image
 
@@ -335,7 +335,7 @@ def cmd_vision(cfg, args):
     if args.rotate is not None:
         cfg["vision"]["rotate"] = args.rotate
     book = BookFrame.from_config(cfg["book"])
-    bench = VisionBench(cfg, TesseractOcr(**cfg["ocr"]), out, args.region, book)
+    bench = VisionBench(cfg, make_ocr(cfg["ocr"]), out, args.region, book)
     if args.images:
         cam = FileCamera(args.images)
         for path in cam.paths:
@@ -417,7 +417,7 @@ def cmd_ui(cfg, args):
 
 
 def cmd_ocr(cfg, args):
-    from .vision import TesseractOcr, process_shot, sharpness
+    from .vision import make_ocr, ocr_image, process_shot, sharpness
 
     from .vision.camera import read_image
 
@@ -425,15 +425,15 @@ def cmd_ocr(cfg, args):
     if frame is None:
         sys.exit(f"cannot read {args.image}")
     pages = process_shot(frame, "spread", cfg["vision"])
-    ocr = TesseractOcr(**cfg["ocr"])
+    ocr = make_ocr(cfg["ocr"])
     debug = Path("runs/debug")
     debug.mkdir(parents=True, exist_ok=True)
     print(f"sharpness: {sharpness(frame):.1f}")
     for side, page in pages.items():
         cv2.imwrite(str(debug / f"{side}_color.png"), page.color)
         cv2.imwrite(str(debug / f"{side}_ocr.png"), page.ocr)
-        res = ocr.read(page.ocr)
-        pn = ocr.page_number(page.ocr, cfg["vision"]["page_number_region"])
+        res = ocr.read(ocr_image(ocr, page))
+        pn = ocr.page_number(ocr_image(ocr, page), cfg["vision"]["page_number_region"])
         print(f"\n=== {side}: page {pn}, conf {res.mean_conf:.0f}, {res.word_count} words ===\n{res.text}")
     print(f"\ndebug images in {debug}/")
 

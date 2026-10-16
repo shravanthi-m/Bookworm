@@ -21,7 +21,7 @@ import cv2
 from ..modes import Scanner, excerpt
 from ..session import RunSummary, Spread
 from ..speech import make_speaker
-from ..vision import TesseractOcr, process_shot
+from ..vision import make_ocr, ocr_image, process_shot
 from ..vision.preprocess import rotate_frame
 
 PAGE = Path(__file__).with_name("index.html")
@@ -60,7 +60,7 @@ class LazyViamCamera:
 class Controller:
     def __init__(self, cfg: dict, camera, config_path: str | None, scan_dir: str):
         self.cfg, self.camera = cfg, camera
-        self.ocr = TesseractOcr(**cfg["ocr"])
+        self.ocr = make_ocr(cfg["ocr"])
         self.speaker = make_speaker(cfg["speech"])
         self.scanner = Scanner(scan_dir, cfg)
         default = [sys.executable, "-m", "bookworm"] + (["--config", config_path] if config_path else []) + ["flip"]
@@ -100,8 +100,8 @@ class Controller:
         v = dict(self.cfg["vision"], rotate=0)  # frame is already upright
         pages = process_shot(frame, "spread", v)
         frac = v["page_number_region"]
-        left = self.ocr.page_number(pages["left"].ocr, frac)
-        right = self.ocr.page_number(pages["right"].ocr, frac) if left is None else None
+        left = self.ocr.page_number(ocr_image(self.ocr, pages["left"]), frac)
+        right = self.ocr.page_number(ocr_image(self.ocr, pages["right"]), frac) if left is None else None
         return Spread(pages, [], left if left is not None else (right - 1 if right else None))
 
     # ---- actions ---------------------------------------------------------------
@@ -143,7 +143,7 @@ class Controller:
         self.state["status"] = "Reading…"
         spread = self._spread()
         r = self.cfg["modes"]["read"]
-        parts = [excerpt(self.ocr.read(spread.pages[s].ocr).text, r.get("max_words_per_page"),
+        parts = [excerpt(self.ocr.read(ocr_image(self.ocr, spread.pages[s])).text, r.get("max_words_per_page"),
                          r.get("min_sentence_quality", 0.95)) for s in r["read_order"]]
         text = " ".join(p for p in parts if p) or "(nothing clear enough to read)"
         self.state["text"] = text
@@ -154,7 +154,7 @@ class Controller:
     def _scan(self):
         self.state["status"] = "Scanning…"
         spread = self._spread()
-        results = {s: self.ocr.read(p.ocr) for s, p in spread.pages.items()}
+        results = {s: self.ocr.read(ocr_image(self.ocr, p)) for s, p in spread.pages.items()}
         self.scanner.on_spread(len(self.scanner.pages) // 2, spread, results)
         self.scanner.finish(RunSummary(spreads=len(self.scanner.pages) // 2, stopped_because="ui"))
         self.state.update(pages=len(self.scanner.pages), pdf=True,
