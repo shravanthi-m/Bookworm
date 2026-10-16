@@ -20,7 +20,7 @@ import numpy as np
 
 from .geometry import book_quad_pixels
 from .page_detect import find_paper_corners, locate_right_corner
-from .preprocess import glare_fraction, process_shot, sharpness
+from .preprocess import detect_rotation, glare_fraction, process_shot, rotate_frame, sharpness
 from .verify import classify_flip
 
 
@@ -76,6 +76,12 @@ class VisionBench:
                "sharp_ok": sharpness(frame) >= v["min_sharpness"],
                "glare_pct": round(100 * glare_fraction(frame), 2),
                "geometry": quad is not None, "pages": {}}
+        if quad is None and not self.results:                 # first frame: is the text upright?
+            extra = detect_rotation(rotate_frame(frame, v.get("rotate", 0)))
+            if extra:
+                rec["suggest_rotate"] = (int(v.get("rotate", 0)) + extra) % 360
+                print(f"!! text looks rotated: set  vision.rotate: {rec['suggest_rotate']}  "
+                      f"(or pass --rotate {rec['suggest_rotate']})")
         outline = find_paper_corners(frame)
         rec["outline_found"] = outline is not None
         if geom is not None and self.book is not None:

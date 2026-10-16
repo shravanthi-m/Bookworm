@@ -19,6 +19,7 @@ from pathlib import Path
 
 import cv2
 
+from .camera import read_image
 from .flip_monitor import FlipMonitor, ReferenceRecorder
 
 
@@ -58,11 +59,11 @@ class _Viam:
 
 class _Folder:
     def __init__(self, folder):
-        self.paths = sorted(p for p in Path(folder).iterdir() if p.suffix.lower() in (".jpg", ".jpeg", ".png"))
+        self.paths = sorted(p for p in Path(folder).iterdir() if p.suffix.lower() in (".jpg", ".jpeg", ".png", ".heic"))
 
     def frames(self):
         for p in self.paths:
-            yield cv2.imread(str(p))
+            yield read_image(p)
 
     def close(self):
         pass

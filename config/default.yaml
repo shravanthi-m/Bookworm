@@ -57,8 +57,9 @@ modes:
 vision:
   # Fallback when camera geometry is unavailable (mock / --images photos):
   # four corners of the spread in the raw image, TL, TR, BR, BL (pixels). null = full frame.
-  book_corners: null
-  fallback_warp_size: [1600, 1100]
+  book_corners: null        # (in the frame AFTER `rotate`)
+  rotate: 0                 # fixed camera mounted sideways? rotate frames upright: 0 | 90 | 180 | 270 (clockwise)
+  fallback_warp_size: [1600, 1100]   # output size when warping to book_corners (calibrate-view sets it)
   min_sharpness: 30.0       # variance-of-Laplacian; below = blurry, recapture (real page frames: ~40-60)
   max_capture_retries: 3
   settle_s: 0.5             # pause after arm moves before capturing (vibration)

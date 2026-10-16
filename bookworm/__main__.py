@@ -177,7 +177,9 @@ def cmd_calibrate_tool_mask(cfg, args):
     from .vision.tool_mask import build_tool_mask, preview
 
     if args.images:
-        frames = [cv2.imread(str(p)) for p in FileCamera(args.images).paths]
+        from .vision.camera import read_image
+
+        frames = [read_image(p) for p in FileCamera(args.images).paths]
     else:
         from .hardware.viam_robot import ViamConnection, ViamRobot
 
@@ -285,7 +287,9 @@ def cmd_calibrate_view(cfg, args):
     """Click the 4 corners of the open spread on a fixed camera's image -> vision.book_corners."""
     import numpy as np
 
-    frame = _grab_view_frame(cfg, args)
+    from .vision.preprocess import rotate_frame
+
+    frame = rotate_frame(_grab_view_frame(cfg, args), cfg["vision"].get("rotate", 0))
     pts: list[list[int]] = []
     labels = ["TOP-LEFT", "TOP-RIGHT", "BOTTOM-RIGHT", "BOTTOM-LEFT"]
     view = frame.copy()
@@ -320,14 +324,17 @@ def cmd_vision(cfg, args):
     from .hardware import BookFrame
     from .vision import FileCamera, TesseractOcr
     from .vision.bench import VisionBench
+    from .vision.camera import read_image
 
     out = Path(f"runs/vision-{time.strftime('%Y%m%d-%H%M%S')}")
+    if args.rotate is not None:
+        cfg["vision"]["rotate"] = args.rotate
     book = BookFrame.from_config(cfg["book"])
     bench = VisionBench(cfg, TesseractOcr(**cfg["ocr"]), out, args.region, book)
     if args.images:
         cam = FileCamera(args.images)
         for path in cam.paths:
-            bench.process(path.name, cv2.imread(str(path)), truth_dir=Path(args.images))
+            bench.process(path.name, read_image(path), truth_dir=Path(args.images))
     elif args.webcam is not None:
         for i in range(args.frames):
             frame = _webcam_frame(args.webcam)
@@ -368,7 +375,9 @@ def cmd_watch_flip(cfg, args):
 def cmd_ocr(cfg, args):
     from .vision import TesseractOcr, process_shot, sharpness
 
-    frame = cv2.imread(args.image)
+    from .vision.camera import read_image
+
+    frame = read_image(args.image)
     if frame is None:
         sys.exit(f"cannot read {args.image}")
     pages = process_shot(frame, "spread", cfg["vision"])
@@ -453,6 +462,7 @@ def main(argv=None):
     vb.add_argument("--interval", type=float, default=2.0)
     vb.add_argument("--manual", action="store_true", help="wait for Enter between live frames (hand-flip test)")
     vb.add_argument("--region", default="spread", choices=["spread", "left", "right"])
+    vb.add_argument("--rotate", type=int, choices=[0, 90, 180, 270], help="override vision.rotate")
     wf = sub.add_parser("watch-flip", help="fold detector: watch a camera during a flip (never moves the arm)")
     wf_src = wf.add_mutually_exclusive_group(required=True)
     wf_src.add_argument("--webcam", type=int, metavar="N")

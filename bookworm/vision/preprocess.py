@@ -118,6 +118,30 @@ def prepare_for_ocr(page: np.ndarray, mode: str = "gray") -> np.ndarray:
     return cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 15)
 
 
+_ROTATIONS = {90: cv2.ROTATE_90_CLOCKWISE, 180: cv2.ROTATE_180, 270: cv2.ROTATE_90_COUNTERCLOCKWISE}
+
+
+def rotate_frame(frame: np.ndarray, degrees_cw: int) -> np.ndarray:
+    """Rotate a fixed camera's frame upright (vision.rotate: 0 | 90 | 180 | 270, clockwise)."""
+    d = int(degrees_cw or 0) % 360
+    return frame if d == 0 else cv2.rotate(frame, _ROTATIONS[d])
+
+
+def detect_rotation(img: np.ndarray) -> int | None:
+    """Clockwise rotation (0/90/180/270) that makes the text upright, via Tesseract OSD. None if unsure."""
+    import pytesseract
+
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
+    scale = 1600 / max(gray.shape)
+    if scale < 1:
+        gray = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+    try:
+        osd = pytesseract.image_to_osd(gray, output_type=pytesseract.Output.DICT)
+    except pytesseract.TesseractError:
+        return None
+    return int(osd["rotate"]) if float(osd.get("orientation_conf", 0)) > 1.0 else None
+
+
 def process_shot(frame: np.ndarray, region: str, vcfg: dict, quad_px=None, size=None) -> dict[str, Page]:
     """Raw frame -> {side: Page} for the pages covered by ``region`` ('spread' | 'left' | 'right').
 
@@ -126,14 +150,18 @@ def process_shot(frame: np.ndarray, region: str, vcfg: dict, quad_px=None, size=
     as a whole spread using the clicked ``book_corners`` (or the full frame).
     """
     frame = apply_tool_mask(frame, vcfg.get("tool_mask"))
+    if quad_px is None:                     # geometry warps handle orientation themselves
+        frame = rotate_frame(frame, vcfg.get("rotate", 0))
     if quad_px is not None:
         img = warp_quad(frame, quad_px, size)
         is_spread = region == "spread"
         band = 0.1                          # spine is known to be near the middle
     else:
         corners = vcfg.get("book_corners")
-        size = vcfg.get("fallback_warp_size", (1600, 1100))
-        img = warp_quad(frame, corners, size) if corners else cv2.resize(frame, tuple(size))
+        if corners:
+            img = warp_quad(frame, corners, vcfg.get("fallback_warp_size", (1600, 1100)))
+        else:
+            img = frame                     # no corners: keep native resolution (don't throw away pixels)
         is_spread, band = True, 0.3
 
     mode = vcfg.get("ocr_input", "gray")
