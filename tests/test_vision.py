@@ -135,3 +135,33 @@ def test_tesseract_end_to_end():
     ocr = TesseractOcr()
     assert "hello" in ocr.read(pages["left"].binary).text.lower()
     assert ocr.page_number(pages["left"].binary, 0.08) == 12
+
+
+def test_word_accuracy():
+    from bookworm.vision.bench import word_accuracy
+
+    assert word_accuracy("the cat sat", "the cat sat") == 1.0
+    assert word_accuracy("the cat sat down", "the bat sat down") == 0.75
+    assert word_accuracy("", "") == 1.0
+
+
+def test_bench_on_photo_folder(tmp_path):
+    from bookworm.config import load_config
+    from bookworm.vision.bench import VisionBench
+
+    class FakeOcr:
+        def read(self, img):
+            from bookworm.vision import OcrResult
+            return OcrResult("hello world line", 90.0, ["hello", "world", "line"])
+
+        def page_number(self, img, frac):
+            return None
+
+    (tmp_path / "a.left.txt").write_text("hello world line")
+    bench = VisionBench(load_config(), FakeOcr(), tmp_path / "out")
+    bench.process("a.png", make_spread(), truth_dir=tmp_path)
+    bench.process("b.png", make_spread("x", "y"), truth_dir=tmp_path)
+    summary = bench.report()
+    assert summary["images"] == 2 and summary["mean_word_accuracy"] == 1.0
+    assert (tmp_path / "out" / "a.panel.jpg").exists()
+    assert "flip_vs_previous" in bench.results[1]

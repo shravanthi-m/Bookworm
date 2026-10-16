@@ -8,7 +8,7 @@ robot:
   backend: viam             # viam | mock   (Viam credentials come from .env)
   arm: arm                  # uFactory arm component name in the Viam app
   gripper: gripper
-  camera: wrist-cam         # wrist camera; must be in the Viam frame system with the arm as parent
+  camera: cam               # RGB-D wrist camera; in the Viam frame system with the arm as parent
   # Distance from the arm flange (what Viam's arm pose refers to) to the eraser tip,
   # along the tool axis. Measure with the pencil in its 3D-printed holder.
   tool_length_mm: 190

@@ -23,8 +23,8 @@ class ViamConnection:
         from dotenv import load_dotenv
 
         load_dotenv()
-        self.address = os.getenv("VIAM_ADDRESS")
-        key_id, key = os.getenv("VIAM_API_KEY_ID"), os.getenv("VIAM_API_KEY")
+        self.address, key_id, key = ((os.getenv(k) or "").strip()
+                                     for k in ("VIAM_ADDRESS", "VIAM_API_KEY_ID", "VIAM_API_KEY"))
         if not (self.address and key_id and key):
             raise HardwareError("VIAM_ADDRESS / VIAM_API_KEY_ID / VIAM_API_KEY not set — copy .env.example to .env")
 
@@ -44,6 +44,23 @@ class ViamConnection:
     def resource_names(self) -> list[str]:
         return [r.name for r in self.machine.resource_names]
 
+    def component(self, cls, name: str, attempts: int = 10):
+        """``cls.from_robot`` with retries: the SDK populates resource clients in the background
+        after connecting, so lookups made immediately can miss."""
+        import time
+
+        last = None
+        for _ in range(attempts):
+            try:
+                return cls.from_robot(self.machine, name)
+            except Exception as e:  # noqa: BLE001 - SDK raises various types for missing resources
+                last = e
+                try:
+                    self.call(self.machine.refresh(), timeout=20)
+                except Exception:  # noqa: BLE001
+                    time.sleep(1)
+        raise HardwareError(f"component '{name}' not available ({last}); machine has: {self.resource_names()}")
+
     def close(self) -> None:
         try:
             self.call(self.machine.close())
@@ -58,12 +75,9 @@ class ViamRobot(Robot):
         from viam.components.gripper import Gripper
 
         self.conn, self.camera_name = conn, camera
-        try:
-            self.arm = Arm.from_robot(conn.machine, arm)
-            self.grip = Gripper.from_robot(conn.machine, gripper)
-            self.cam = Camera.from_robot(conn.machine, camera)
-        except Exception as e:  # noqa: BLE001 - SDK raises various types for missing resources
-            raise HardwareError(f"component lookup failed ({e}); machine has: {conn.resource_names()}") from e
+        self.arm = conn.component(Arm, arm)
+        self.grip = conn.component(Gripper, gripper)
+        self.cam = conn.component(Camera, camera)
         self._intrinsics = None
 
     # ---- arm / gripper ------------------------------------------------------
@@ -87,11 +101,13 @@ class ViamRobot(Robot):
     # ---- camera -------------------------------------------------------------
     def capture(self):
         images, _ = self.conn.call(self.cam.get_images())
-        if not images:
-            raise HardwareError("wrist camera returned no images")
-        frame = cv2.imdecode(np.frombuffer(images[0].data, np.uint8), cv2.IMREAD_COLOR)
+        # RGB-D camera: returns 'color' (jpeg) and 'depth' (vnd.viam.dep); take the colour one.
+        color = [im for im in images if not im.mime_type.startswith("image/vnd.viam.dep")]
+        if not color:
+            raise HardwareError("wrist camera returned no colour image")
+        frame = cv2.imdecode(np.frombuffer(color[0].data, np.uint8), cv2.IMREAD_COLOR)
         if frame is None:
-            raise HardwareError(f"could not decode {images[0].mime_type} from wrist camera")
+            raise HardwareError(f"could not decode {color[0].mime_type} from wrist camera")
         self._last_size = frame.shape[1], frame.shape[0]
         return frame
 

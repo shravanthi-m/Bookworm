@@ -6,9 +6,11 @@
 |------|-----------------------------|----------|
 | uFactory arm | `arm` (`robot.arm`) | moving the camera to capture poses and moving the pencil to flip pages |
 | Gripper | `gripper` (`robot.gripper`) | holding the pencil, eraser end down |
-| Calibrated wrist camera | `wrist-cam` (`robot.camera`) | page images; its intrinsics and frame (parent = arm) map pixels to world mm |
+| Calibrated wrist camera (RGB-D) | `cam` (`robot.camera`) | colour + depth streams; intrinsics (fx≈fy≈906 px at 1280×720) and frame (parent = `arm`) map pixels to world mm |
 
 Everything is reached through Viam API calls, using the API key in `.env`. Nothing else is wired up: **no servos, no microcontroller**. If the component names in the Viam app are different, set them in `config/local.yaml`. Then run `python -m bookworm check` to confirm the connection, camera intrinsics and camera pose.
+
+Also on the machine: the `builtin` motion service with obstacle geometries (`table`, `ceiling`, `wall-front`, `wall-side`), a `gripper` frame 105 mm out from the flange, a `pencil` generic component and a `home-pose` switch. *Verified 2026-10-16 with `bookworm check`.*
 
 > **Assumption to verify early:** the wrist camera's frame follows the pinhole convention (x right, y down, z out of the lens). `python -m bookworm overlay` draws the calibrated book outline on a live frame. If the outline sits on the pages, the geometry is right.
 

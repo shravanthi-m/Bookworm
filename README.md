@@ -58,7 +58,7 @@ pytest                          # should pass with no hardware
 2. Fill in `.env`: `VIAM_ADDRESS`, `VIAM_API_KEY_ID`, `VIAM_API_KEY`.
 3. `.env` is git-ignored. **Never commit keys.** If one leaks, delete it in the Viam app and make a new one.
 
-Component names default to `arm`, `gripper` and `wrist-cam`. If yours are different, override them in `config/local.yaml`:
+Component names match the configured machine: `arm`, `gripper`, `cam`. If yours are different, override them in `config/local.yaml`:
 
 ```yaml
 robot: {arm: my-xarm, gripper: my-gripper, camera: my-cam}
@@ -90,6 +90,29 @@ python -m bookworm flip --mock                       # print the flip waypoints
 ```
 
 Every run saves its captures and OCR text to `runs/<timestamp>-<mode>/`. Use these as vision test data.
+
+## Where vision runs
+
+Vision is **plain Python on the laptop** (the Viam *client*), not a Viam module or a separate service. Viam provides the **inputs**: colour frames from the wrist camera (`cam`, an RGB-D camera), its intrinsics, and the camera pose from the Viam frame system (`cam` is a child of `arm`). Everything after that (OpenCV preprocessing, Tesseract OCR, flip checks) runs locally.
+
+- **No training, no API keys for models.** The pipeline is classical OpenCV plus Tesseract, which comes with its own pretrained English model. Printed book text is the easy case for OCR.
+- **No OpenRouter or LLM in the loop.** If Tesseract struggles (decorative fonts, children's books with text over pictures), a vision-LLM OCR backend can be added behind the same `ocr.read()` interface without touching anything else. It costs network latency and money per page.
+- **Could become a Viam vision-service module later** if we wanted it on the robot computer, but for a hackathon a local client is faster to iterate on.
+
+## Testing the vision pipeline on its own (no arm motion)
+
+```bash
+python -m bookworm vision --images photos/                  # any photos of open books (phone is fine)
+python -m bookworm vision --live                            # one frame from the wrist camera, where the arm is now
+python -m bookworm vision --live --frames 10 --manual       # turn pages by hand between frames → tests flip checking
+```
+
+Each run writes `runs/vision-<timestamp>/`, containing:
+- `*.panel.jpg` debug images: raw frame with the detected outline, then the colour pages, then the binarised pages.
+- OCR text per page.
+- `results.json`: sharpness, OCR confidence, page numbers, flip outcome for each consecutive pair, and timing.
+
+Ground truth is optional. Put `photo.left.txt` / `photo.right.txt` next to `photo.jpg` and the report adds word accuracy.
 
 ## How the vision works
 

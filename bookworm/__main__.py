@@ -12,6 +12,8 @@ Setup / calibration (writes config/local.yaml)
     overlay POSE           move to POSE, draw the projected book outline -> runs/overlay.jpg
 
 Development
+    vision --images DIR    vision-only test bench on photos (accuracy report, debug panels)
+    vision --live          same, on the live wrist camera — never moves the arm
     ocr IMAGE              vision pipeline on one photo; debug images in runs/debug/
     flip [--times N]       run the flip motion only (tuning)
 """
@@ -176,6 +178,44 @@ def cmd_overlay(cfg, args):
 
 
 # ---- development --------------------------------------------------------------
+def cmd_vision(cfg, args):
+    """Vision-only test bench on photos or the live wrist camera. Never moves the arm."""
+    import time
+
+    from .hardware import BookFrame
+    from .vision import FileCamera, TesseractOcr
+    from .vision.bench import VisionBench
+
+    out = Path(f"runs/vision-{time.strftime('%Y%m%d-%H%M%S')}")
+    book = BookFrame.from_config(cfg["book"])
+    bench = VisionBench(cfg, TesseractOcr(**cfg["ocr"]), out, args.region, book)
+    if args.images:
+        cam = FileCamera(args.images)
+        for path in cam.paths:
+            bench.process(path.name, cv2.imread(str(path)), truth_dir=Path(args.images))
+    else:
+        from .hardware.viam_robot import ViamConnection, ViamRobot
+
+        conn = ViamConnection()
+        try:
+            robot = ViamRobot(conn, **cfg["robot"])
+            for i in range(args.frames):
+                frame = robot.capture()
+                try:
+                    geom = robot.camera_geometry()
+                except Exception as e:  # noqa: BLE001 - still useful without geometry
+                    print("no camera geometry:", e)
+                    geom = None
+                cv2.imwrite(str(out / f"live{i:02d}.jpg"), frame)
+                bench.process(f"live{i:02d}.jpg", frame, geom)
+                if i + 1 < args.frames:
+                    input("Turn the page by hand (or leave it), then press Enter...") if args.manual \
+                        else time.sleep(args.interval)
+        finally:
+            conn.close()
+    bench.report()
+
+
 def cmd_ocr(cfg, args):
     from .vision import TesseractOcr, process_shot, sharpness
 
@@ -242,6 +282,14 @@ def main(argv=None):
     sub.add_parser("calibrate-book")
     ov = sub.add_parser("overlay")
     ov.add_argument("pose", nargs="?", default="overview")
+    vb = sub.add_parser("vision", help="vision-only test bench (no arm motion)")
+    src = vb.add_mutually_exclusive_group(required=True)
+    src.add_argument("--images", help="folder of photos (+ optional <stem>.left.txt/.right.txt ground truth)")
+    src.add_argument("--live", action="store_true", help="Viam wrist camera at its current pose")
+    vb.add_argument("--frames", type=int, default=1)
+    vb.add_argument("--interval", type=float, default=2.0)
+    vb.add_argument("--manual", action="store_true", help="wait for Enter between live frames (hand-flip test)")
+    vb.add_argument("--region", default="spread", choices=["spread", "left", "right"])
     o = sub.add_parser("ocr")
     o.add_argument("image")
     f = sub.add_parser("flip")
@@ -255,7 +303,7 @@ def main(argv=None):
     cfg = load_config(args.config or (LOCAL_CFG if LOCAL_CFG.exists() else None))
     handlers = {"read": cmd_read, "scan": cmd_scan, "check": cmd_check, "pencil": cmd_pencil,
                 "save-pose": cmd_save_pose, "calibrate-book": cmd_calibrate_book,
-                "overlay": cmd_overlay, "ocr": cmd_ocr, "flip": cmd_flip}
+                "overlay": cmd_overlay, "vision": cmd_vision, "ocr": cmd_ocr, "flip": cmd_flip}
     handlers[args.cmd](cfg, args)
 
 

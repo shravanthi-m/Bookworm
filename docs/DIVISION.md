@@ -19,6 +19,7 @@ Three owners, three parts of the codebase. Each person owns their folder and ope
 | V5 | Page-number detection (header/footer) | `TesseractOcr.page_number` | ≥ 90 % hit rate on the demo book |
 | V6 | **Corner detection to guide the eraser**: book outline → right-page corner in book mm | `vision/page_detect.py` | the corner lands within 5 mm of a ruler measurement |
 | V7 | Flip verification thresholds from real flip / no-flip / double-flip images | `vision/verify.py` | catches every double flip in a 20-flip test |
+| V9 | **Depth stream** (the `cam` is RGB-D): measure the page surface height before each flip (replaces the `z_drop_per_flip_mm` guess) and the curl near the spine | `hardware/viam_robot.py` → new `capture_depth()`, `vision/` | the measured page height is within 1 mm of a touch-off |
 | V8 | Scan quality for archival mode: 300 dpi warp, white balance, optional curl dewarping near the spine (stretch) | `preprocess.py` | pages look like a flatbed scan |
 
 ## 🟩 Teammate B — CAD + motion software
@@ -44,6 +45,7 @@ Three owners, three parts of the codebase. Each person owns their folder and ope
 | P2 | Record the capture poses: `home`, `overview`, `scan_left`, `scan_right` | `bookworm save-pose` | each pose frames its region with margin (check with `overlay`) |
 | P3 | **Read-aloud mode**: a child-friendly voice, pacing, pause/resume/stop control, friendly error messages | `modes/read_aloud.py`, `speech/` | reads 5 spreads hands-off |
 | P4 | **Scan mode**: searchable PDF (Tesseract PDF output + merge), resume an interrupted scan, manifest | `modes/scan.py` | 20-page scan produces a searchable PDF |
+| P7 | Consider the `builtin` motion service (obstacles are already configured) for collision-aware moves to the capture poses | `viam_robot.py` | moves plan around the table and walls |
 | P5 | Robustness: reconnect on dropped Wi-Fi, timeouts, Ctrl+C sends the arm home | `viam_robot.py`, `session.py` | pulling Wi-Fi for 5 s doesn't crash the run |
 | P6 | Demo: script, backup demo (`--images` with recorded photos), README results, video | README | rehearsal runs end to end |
 
