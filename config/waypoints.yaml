@@ -12,6 +12,10 @@ out_of_the_way:               # arm parked clear of the book (not part of the fl
 
 # The page-flip path, in order. Point 1 is `start` above.
 flip_path:
+  - name: "0"                 # 40 mm straight above start: arrive from above so nothing drags the page
+    recorded: 2026-10-16
+    joints: [87.53, -72.34, -101.98, -51.88, -90.27, 247.48]
+    pose: {x: 99.32, y: 660.51, z: 159.17, o_x: 0.76, o_y: -0.57, o_z: -0.30, theta: -88.44}
   - name: start
   - name: deep                # point 2 v2: deep into the page (replaces v1: joints 77.35,-70.06,-93.97,-55.23,-81.83,248.75)
     recorded: 2026-10-16
@@ -37,5 +41,8 @@ flip_path:
     recorded: 2026-10-16
     joints: [72.1, -61.99, -83.62, -35.84, -78.51, 248.75]
     pose: {x: 227.74, y: 536.93, z: 163.46, o_x: 0.34, o_y: -0.81, o_z: -0.48, theta: -97.02}
-  - name: lift                # return via point 3 so the pencil doesn't drag the paper
-  - name: start               # back to point 1, ready for the next page
+  - name: 6b                  # lift off: 40 mm straight up from final, so the tucked page isn't pulled back out
+    recorded: 2026-10-16
+    joints: [72.08, -57.54, -81.8, -35.45, -80.57, 247.22]
+    pose: {x: 227.74, y: 536.93, z: 203.42, o_x: 0.34, o_y: -0.81, o_z: -0.48, theta: -97.02}
+  - name: "0"                 # back above start, ready for the next page (loop repeats from here)
