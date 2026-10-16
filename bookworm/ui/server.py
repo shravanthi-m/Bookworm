@@ -22,6 +22,7 @@ from ..modes import Scanner, excerpt
 from ..session import RunSummary, Spread, best_of_frames
 from ..speech import make_speaker
 from ..vision import make_ocr, ocr_image, process_shot
+from ..vision.page_detect import find_book_quad
 from ..vision.preprocess import rotate_frame
 
 PAGE = Path(__file__).with_name("index.html")
@@ -79,8 +80,12 @@ class Controller:
         while True:
             try:
                 f = rotate_frame(self.camera.capture(), self.cfg["vision"].get("rotate", 0))
-                ok, buf = cv2.imencode(".jpg", cv2.resize(f, (960, int(960 * f.shape[0] / f.shape[1]))),
-                                       [cv2.IMWRITE_JPEG_QUALITY, 75])
+                small = cv2.resize(f, (960, int(960 * f.shape[0] / f.shape[1])))
+                if self.cfg["vision"].get("auto_corners"):
+                    quad = find_book_quad(small)               # show what will be read
+                    if quad is not None:
+                        cv2.polylines(small, [quad.astype("int32")], True, (80, 140, 110), 2)
+                ok, buf = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, 75])
                 with self.lock:
                     self.frame, self.jpeg = f, buf.tobytes() if ok else self.jpeg
                 if self.state["status"].startswith(("Camera:", "Connecting")):

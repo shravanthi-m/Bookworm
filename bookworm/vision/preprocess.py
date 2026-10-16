@@ -158,8 +158,17 @@ def process_shot(frame: np.ndarray, region: str, vcfg: dict, quad_px=None, size=
         band = 0.1                          # spine is known to be near the middle
     else:
         corners = vcfg.get("book_corners")
-        if corners:
-            img = warp_quad(frame, corners, vcfg.get("fallback_warp_size", (1600, 1100)))
+        if vcfg.get("auto_corners"):          # camera may have been bumped: find the book each frame
+            from .page_detect import find_book_quad
+
+            found = find_book_quad(frame)
+            if found is not None:
+                corners = found
+        if corners is not None and len(corners):
+            c = np.asarray(corners, np.float32)
+            size = (max(np.linalg.norm(c[1] - c[0]), np.linalg.norm(c[2] - c[3])),   # native resolution
+                    max(np.linalg.norm(c[3] - c[0]), np.linalg.norm(c[2] - c[1])))
+            img = warp_quad(frame, c, size)
         else:
             img = frame                     # no corners: keep native resolution (don't throw away pixels)
         is_spread, band = True, 0.3
