@@ -71,7 +71,7 @@ vision:
   # Build with: python -m bookworm calibrate-tool-mask   (writes the path into config/local.yaml)
   tool_mask: null
   ocr_input: gray           # gray (flatten + sharpen, Tesseract binarises) | binary (our adaptive threshold)
-  page_number_region: 0.08  # bottom/top fraction of each page searched for page number
+  page_number_region: 0.12  # top/bottom fraction of each page searched for the page number
   corner_search_mm: 25      # vision corner must be within this of the calibrated corner
   # Fold / bad-flip detector (python -m bookworm watch-flip). Standalone: watches, never moves the arm.
   flip_monitor:

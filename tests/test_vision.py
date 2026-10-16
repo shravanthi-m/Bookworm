@@ -127,6 +127,10 @@ def test_clean_text():
     assert clean_text("The quick bro-\nwn fox\njumps.\n\n42\n\nNext para.") == "The quick brown fox jumps.\n\nNext para."
     assert parse_page_number("  - 17 -\n") == 17
     assert parse_page_number("no digits") is None
+    assert parse_page_number("204 : JOSTEIN GAARDER") == 204
+    assert parse_page_number("SOPHIE'S WORLD : 201") == 201
+    assert parse_page_number("Baruch Spinoza, who lived from 1632 to 1677, was a great philosopher") is None
+    assert parse_page_number("SPINOZA\n* * *") is None
 
 
 @pytest.mark.skipif(shutil.which("tesseract") is None, reason="tesseract not installed")
