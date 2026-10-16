@@ -18,6 +18,7 @@ Development
     vision --images DIR    vision-only test bench on photos (accuracy report, debug panels)
     vision --live          same, on the live Viam camera — never moves the arm
     vision --webcam N      same, on a local camera (e.g. iPhone Continuity Camera), no Viam needed
+    watch-flip             fold detector: --record good|bad flips, then watch live (never moves the arm)
     ocr IMAGE              vision pipeline on one photo; debug images in runs/debug/
     flip [--times N]       run the flip motion only (tuning)
 """
@@ -358,6 +359,12 @@ def cmd_vision(cfg, args):
     bench.report()
 
 
+def cmd_watch_flip(cfg, args):
+    from .vision.watch import watch_flip
+
+    watch_flip(cfg, args)
+
+
 def cmd_ocr(cfg, args):
     from .vision import TesseractOcr, process_shot, sharpness
 
@@ -446,6 +453,15 @@ def main(argv=None):
     vb.add_argument("--interval", type=float, default=2.0)
     vb.add_argument("--manual", action="store_true", help="wait for Enter between live frames (hand-flip test)")
     vb.add_argument("--region", default="spread", choices=["spread", "left", "right"])
+    wf = sub.add_parser("watch-flip", help="fold detector: watch a camera during a flip (never moves the arm)")
+    wf_src = wf.add_mutually_exclusive_group(required=True)
+    wf_src.add_argument("--webcam", type=int, metavar="N")
+    wf_src.add_argument("--live", action="store_true", help="the configured Viam camera")
+    wf_src.add_argument("--images", help="replay saved frames (e.g. runs/watch-*/frames)")
+    wf.add_argument("--record", choices=["good", "bad"], help="save frames as a GOOD/BAD reference instead of judging")
+    wf.add_argument("--fps", type=float, default=8.0)
+    wf.add_argument("--max-deviation", type=float, help="override vision.flip_monitor.max_deviation")
+    wf.add_argument("--say", action="store_true", help="also say 'stop' out loud on STOP")
     o = sub.add_parser("ocr")
     o.add_argument("image")
     f = sub.add_parser("flip")
@@ -460,7 +476,7 @@ def main(argv=None):
     handlers = {"read": cmd_read, "scan": cmd_scan, "check": cmd_check, "pencil": cmd_pencil,
                 "save-pose": cmd_save_pose, "calibrate-book": cmd_calibrate_book,
                 "calibrate-tool-mask": cmd_calibrate_tool_mask, "calibrate-view": cmd_calibrate_view,
-                "webcams": cmd_webcams,
+                "webcams": cmd_webcams, "watch-flip": cmd_watch_flip,
                 "overlay": cmd_overlay, "vision": cmd_vision, "ocr": cmd_ocr, "flip": cmd_flip}
     handlers[args.cmd](cfg, args)
 

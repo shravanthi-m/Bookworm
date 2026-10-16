@@ -116,6 +116,17 @@ Each run writes `runs/vision-<timestamp>/`, containing:
 
 Ground truth is optional. Put `photo.left.txt` / `photo.right.txt` next to `photo.jpg` and the report adds word accuracy.
 
+### Fold detector (standalone, never moves the arm)
+
+```bash
+python -m bookworm watch-flip --webcam 1 --record good      # while a GOOD flip runs (Ctrl+C at the end)
+python -m bookworm watch-flip --webcam 1 --record bad       # while a flip goes wrong (page starts folding)
+python -m bookworm watch-flip --webcam 1 --say              # watch: per-frame score, STOP (+ beep / "stop") on a fold
+python -m bookworm watch-flip --images runs/watch-*/frames  # replay a saved run to tune max_deviation
+```
+
+Each frame becomes a blurred "shape signature" (text washes out, the page's curl and silhouette remain) and is compared with recorded good and bad flips. No training needed. References live in `config/flip_reference/`.
+
 ## How the vision works
 
 | Step | Code | Why |

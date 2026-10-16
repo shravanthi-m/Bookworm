@@ -21,6 +21,7 @@ Three owners, three parts of the codebase. Each person owns their folder and ope
 | V7 | Flip verification thresholds from real flip / no-flip / double-flip images | `vision/verify.py` | catches every double flip in a 20-flip test |
 | V9 | **Depth stream** (the `cam` is RGB-D): measure the page surface height before each flip (replaces the `z_drop_per_flip_mm` guess) and the curl near the spine | `hardware/viam_robot.py` → new `capture_depth()`, `vision/` | the measured page height is within 1 mm of a touch-off |
 | V10 | **Pencil/gripper mask** (`calibrate-tool-mask`) and **lighting**: illumination flattening, glare % in the bench, pick a lamp position with the team | `vision/tool_mask.py`, `preprocess.py` | no pencil pixels in page crops; glare < 1 % at the capture poses |
+| V11 | **Fold detector** (`watch-flip`): record good/bad flips while the motion is being tuned, set `max_deviation` from the logged scores; integrate into the flip loop later with Teammate B | `vision/flip_monitor.py`, `vision/watch.py` | STOP fires before a fold on recorded bad flips, never on good ones |
 | V8 | Scan quality for archival mode: 300 dpi warp, white balance, optional curl dewarping near the spine (stretch) | `preprocess.py` | pages look like a flatbed scan |
 
 ## 🟩 Teammate B — CAD + motion software

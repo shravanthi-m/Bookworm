@@ -72,6 +72,11 @@ vision:
   ocr_input: gray           # gray (flatten + sharpen, Tesseract binarises) | binary (our adaptive threshold)
   page_number_region: 0.08  # bottom/top fraction of each page searched for page number
   corner_search_mm: 25      # vision corner must be within this of the calibrated corner
+  # Fold / bad-flip detector (python -m bookworm watch-flip). Standalone: watches, never moves the arm.
+  flip_monitor:
+    reference_dir: config/flip_reference   # good/ and bad/ recordings (commit them: shared rig)
+    max_deviation: 0.2      # distance from the nearest GOOD frame above which a frame is "odd"
+    stop_after: 3           # consecutive odd frames before STOP
 
 ocr:
   lang: eng
