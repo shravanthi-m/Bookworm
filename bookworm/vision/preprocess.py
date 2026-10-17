@@ -28,13 +28,22 @@ def sharpness(img: np.ndarray) -> float:
 
 
 def find_gutter(img: np.ndarray, search_band: float = 0.3) -> int:
-    """x-coordinate of the spine: the darkest column near the middle (fold shadow)."""
+    """x-coordinate between the pages: the text-free gap nearest the middle.
+
+    "Darkest column" is unreliable: the right page's text often starts right at the fold
+    and its first letters are darker than the fold's shadow, which cut words off. Instead
+    measure ink (text marks) per column and split where there is least text; ties go to
+    the column closest to the centre.
+    """
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
-    w = gray.shape[1]
+    h, w = gray.shape
     lo, hi = int(w * (0.5 - search_band / 2)), int(w * (0.5 + search_band / 2))
-    profile = gray[:, lo:hi].mean(axis=0)
-    profile = np.convolve(profile, np.ones(9) / 9, mode="same")  # smooth out text columns
-    return lo + int(np.argmin(profile[4:-4])) + 4
+    ink = cv2.adaptiveThreshold(cv2.GaussianBlur(gray, (3, 3), 0), 1, cv2.ADAPTIVE_THRESH_MEAN_C,
+                                cv2.THRESH_BINARY_INV, 25, 15)
+    profile = ink[int(h * 0.08):int(h * 0.95), lo:hi].mean(axis=0)
+    profile = np.convolve(profile, np.ones(5) / 5, mode="same")
+    candidates = np.where(profile <= profile.min() + 0.02)[0] + lo
+    return int(candidates[np.argmin(np.abs(candidates - w / 2))])
 
 
 def mask_rects(img: np.ndarray, rects, fill=255) -> np.ndarray:
