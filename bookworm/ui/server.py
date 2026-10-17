@@ -18,6 +18,7 @@ from pathlib import Path
 
 import cv2
 
+from ..llm import LlmError, make_llm, summarize
 from ..modes import Scanner, excerpt
 from ..session import RunSummary, Spread, best_of_frames
 from ..speech import make_speaker
@@ -28,7 +29,14 @@ from ..vision.preprocess import rotate_frame
 PAGE = Path(__file__).with_name("index.html")
 ACTIONS = {"flip": ["flip"], "read": ["read"], "scan": ["scan"],
            "flip_read": ["flip", "read"], "flip_scan": ["flip", "scan"],
-           "look": ["look"], "next": ["flip", "look"]}   # look = refresh the on-screen pages, no OCR
+           "look": ["look"], "next": ["flip", "look"],   # look = refresh the on-screen pages, no OCR
+           "summarize": ["summarize"], "flip_summarize": ["flip", "summarize"],
+           "park": ["park"], "ready": ["ready"], "resume": ["resume"]}
+ACKS = {"flip": "Turning the page.", "next": "Turning the page.", "read": "Okay, reading.",
+        "scan": "Scanning.", "summarize": "Let me summarise.", "flip_read": "Turning the page, then reading.",
+        "flip_scan": "Turning the page, then scanning.", "flip_summarize": "Turning the page, then summarising.",
+        "park": "Moving away.", "ready": "Coming back.", "look": "Looking."}   # resume: no ack, it just carries on
+GOTO_DIR = Path(__file__).resolve().parents[2] / "scripts"
 
 
 class LazyViamCamera:
@@ -41,13 +49,16 @@ class LazyViamCamera:
     def _connect(self):
         from ..hardware.viam_robot import ViamConnection, ViamRobot
 
+        # Keep one connection and retry the camera lookup on it: every new connection starts
+        # its own Rust runtime, and leaking one per retry ran macOS out of threads.
         while self.robot is None:
             try:
-                self.conn = ViamConnection()
+                self.conn = self.conn or ViamConnection()
                 self.robot = ViamRobot(self.conn, **self.cfg["robot"])
             except Exception as e:  # noqa: BLE001 - keep retrying; shown on the page
                 self.error = e
-                time.sleep(3)
+                print(f"[ui] camera not ready: {str(e)[:150]}", flush=True)
+                time.sleep(10)
 
     def capture(self):
         if self.robot is None:
@@ -64,6 +75,7 @@ class Controller:
         self.cfg, self.camera = cfg, camera
         self.ocr = make_ocr(cfg["ocr"])
         self.speaker = make_speaker(cfg["speech"])
+        self.llm = make_llm(cfg.get("llm"))
         self.scanner = Scanner(scan_dir, cfg)
         default = [sys.executable, "-m", "bookworm"] + (["--config", config_path] if config_path else []) + ["flip"]
         cmd = cfg.get("ui", {}).get("flip_command")
@@ -103,14 +115,15 @@ class Controller:
                 time.sleep(1)
             time.sleep(0.05)
 
-    def _spread(self) -> Spread:
+    def _spread(self, n_frames: int | None = None) -> Spread:
         time.sleep(0.4)                        # let the feed catch up after a flip
         frames = []
-        for _ in range(max(1, int(self.cfg["ocr"].get("frames", 1)))):
+        for i in range(max(1, int(n_frames or self.cfg["ocr"].get("frames", 1)))):
+            if i:
+                time.sleep(self.cfg["ocr"].get("frame_gap_s", 0.3))   # only between frames
             with self.lock:
                 if self.frame is not None:
                     frames.append(self.frame.copy())
-            time.sleep(self.cfg["ocr"].get("frame_gap_s", 0.3))
         if not frames:
             raise RuntimeError("no camera frame yet")
         v = dict(self.cfg["vision"], rotate=0)  # frames are already upright
@@ -144,9 +157,15 @@ class Controller:
             self.state["status"] = "Ready"
 
     # ---- actions ---------------------------------------------------------------
-    def start(self, name: str) -> bool:
-        if self.state["busy"] or name not in ACTIONS:
+    def start(self, name: str, voice: bool = False) -> bool:
+        if name not in ACTIONS:
             return False
+        if self.state["busy"]:
+            if voice:
+                self.speaker.say("Hang on, I'm still busy.", resumable=False)
+            return False
+        if voice and name in ACKS:             # spoken reply so the user knows they were heard
+            self.speaker.say(ACKS[name], resumable=False)
         self._stop.clear()
         self.state["busy"] = True
         threading.Thread(target=self._run, args=(ACTIONS[name],), daemon=True).start()
@@ -154,6 +173,10 @@ class Controller:
 
     def stop(self):
         self._stop.set()
+        self.speaker.stop()
+        arm, conn = getattr(self, "_arm", None), getattr(self.camera, "conn", None)
+        if arm is not None and conn is not None and self.state.get("busy"):
+            threading.Thread(target=lambda: conn.call(arm.stop(), timeout=10), daemon=True).start()
         if self._proc and self._proc.poll() is None:
             self._proc.terminate()
 
@@ -169,16 +192,52 @@ class Controller:
         finally:
             self.state["busy"] = False
 
+    def _command(self, cmd, what):
+        """Run an arm script; Stop terminates it (the scripts halt the arm on SIGTERM)."""
+        self._proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        last = ""
+        for line in self._proc.stdout:
+            print(line, end="", flush=True)
+            last = line.strip() or last
+        if self._proc.wait() != 0 and not self._stop.is_set():
+            raise RuntimeError(f"{what}: {last or f'exited with {self._proc.returncode}'}")
+
+    def _goto(self, target: str, doing: str, done: str):
+        """Park / come back over the page's own Viam connection (no new dial per command)."""
+        conn = getattr(self.camera, "conn", None)
+        if conn is None:
+            raise RuntimeError("not connected to the robot yet")
+        if str(GOTO_DIR) not in sys.path:
+            sys.path.insert(0, str(GOTO_DIR))
+        from arm_goto import goto
+        from viam.components.arm import Arm
+
+        self.state["status"] = doing
+        self._arm = conn.component(Arm, self.cfg["robot"].get("arm", "arm"))
+        code, msg = goto(conn, self._arm, target)
+        print(f"[arm] {msg}", flush=True)
+        if self._stop.is_set():
+            return
+        if code != 0:
+            raise RuntimeError(msg)            # shown in the status line
+        self.state["status"] = done
+
+    def _resume(self):
+        self.state["status"] = "Continuing" if self.speaker.resume() else "Nothing to continue"
+
+    def _park(self):
+        self._goto("park", "Moving away…", "Parked")
+
+    def _ready(self):
+        self._goto("ready", "Coming back…", "Ready above the page")
+
     def _flip(self):
         self.state.update(status="Flipping…", flipping=True)
         t0 = time.time()
         try:
-            self._proc = subprocess.Popen(self.flip_cmd)
-            code = self._proc.wait()
+            self._command(self.flip_cmd, "flip")
         finally:
             self.state["flipping"] = False
-        if code != 0 and not self._stop.is_set():
-            raise RuntimeError(f"flip exited with {code}")
         if not self._stop.is_set():
             self.state["flip_s"] = round(time.time() - t0, 1)   # next animation matches the real arm
         if hasattr(self.camera, "advance"):    # photo playback stands in for a real flip
@@ -187,15 +246,33 @@ class Controller:
 
     def _read(self):
         self.state["status"] = "Reading…"
-        spread = self._spread()
+        spread = self._spread(self.cfg["modes"]["read"].get("frames", 1))   # 1 frame: fast
         r = self.cfg["modes"]["read"]
         parts = [excerpt(spread.results[s].text, r.get("max_words_per_page"),
                          r.get("min_sentence_quality", 0.95)) for s in r["read_order"]]
-        text = " ".join(p for p in parts if p) or "(nothing clear enough to read)"
-        self.state["text"] = text
-        if not text.startswith("("):
+        text = " ".join(p for p in parts if p)
+        if not text:        # no clean sentence: read the start of the page anyway, better than silence
+            raw = " ".join(spread.results[s].text for s in r["read_order"]).split()
+            text = " ".join(raw[2:2 + (r.get("max_words_per_page") or 30)])   # skip the running header
+        self.state["text"] = text or "(no text found on the page)"
+        if text and not self._stop.is_set():
             self.speaker.say(text)
         self.state["status"] = f"Read page {spread.page_no}" if spread.page_no else "Read"
+
+    def _summarize(self):
+        self.state["status"] = "Summarising…"
+        spread = self._spread(self.cfg["modes"]["read"].get("frames", 1))
+        text = "\n\n".join(spread.results[s].text for s in self.cfg["modes"]["read"]["read_order"]).strip()
+        if not text:
+            raise RuntimeError("no text found on the page")
+        try:
+            summary = summarize(self.llm, text, self.cfg.get("llm", {}).get("summary_sentences", 2))
+        except LlmError as e:
+            raise RuntimeError(f"summary failed ({e})") from e
+        self.state["text"] = summary
+        if not self._stop.is_set():
+            self.speaker.say(summary)
+        self.state["status"] = f"Summarised page {spread.page_no}" if spread.page_no else "Summarised"
 
     def _scan(self):
         self.state["status"] = "Scanning…"
@@ -223,7 +300,9 @@ def serve(ctrl: Controller, port: int = 8000):
             if self.path == "/":
                 self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
             elif self.path == "/state":
-                self._send(200, json.dumps(ctrl.state).encode(), "application/json")
+                state = dict(ctrl.state, speaking=bool(getattr(ctrl.speaker, "speaking", False)),
+                             llm=ctrl.llm.ready)
+                self._send(200, json.dumps(state).encode(), "application/json")
             elif self.path.startswith("/static/"):            # decor images that ship with the page
                 f = PAGE.parent / Path(self.path.split("?")[0]).name
                 types = {".png": "image/png", ".webp": "image/webp", ".svg": "image/svg+xml", ".jpg": "image/jpeg"}
@@ -256,11 +335,18 @@ def serve(ctrl: Controller, port: int = 8000):
                 self._send(404, b"not found", "text/plain")
 
         def do_POST(self):
-            if self.path == "/stop":
+            if self.path.startswith("/stop"):
                 ctrl.stop()
                 self._send(200, b"{}", "application/json")
+            elif self.path.startswith("/heard"):            # voice transcripts, logged for debugging
+                n = int(self.headers.get("Content-Length") or 0)
+                print(f"[heard] {self.rfile.read(n).decode(errors='replace')[:200]}", flush=True)
+                if "unknown" in self.path and not getattr(ctrl.speaker, "speaking", False):
+                    ctrl.speaker.say("Sorry, I didn't catch that.", resumable=False)
+                self._send(200, b"{}", "application/json")
             elif self.path.startswith("/do/"):
-                ok = ctrl.start(self.path[4:])
+                name, _, query = self.path[4:].partition("?")
+                ok = ctrl.start(name, voice="voice" in query)
                 self._send(200 if ok else 409, json.dumps({"ok": ok}).encode(), "application/json")
             else:
                 self._send(404, b"not found", "text/plain")

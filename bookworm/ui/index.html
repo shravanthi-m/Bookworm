@@ -210,6 +210,11 @@
   button:focus-visible, .next:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
   button:disabled { color: #A89584; background: #EFE6D8; cursor: default; }
   .stop { color: var(--danger); border-color: #E7A69D; }
+  .listen[aria-pressed="true"] { border-color: var(--amber); background: #FFF2DC; }
+  .listen[aria-pressed="true"]::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 7px;
+            border-radius: 50%; background: var(--danger); vertical-align: 1px; animation: rec 1.4s ease-in-out infinite; }
+  @keyframes rec { 50% { opacity: .3; } }
+  @media (prefers-reduced-motion: reduce) { .listen[aria-pressed="true"]::before { animation: none; } }
   .camtoggle { font-size: 12px; min-height: 32px; padding: 7px 12px; }
   .status { margin: 0; font-size: 13px; color: #F3E3CC; min-height: 1.4em; text-align: center; }
   .status b { color: #FFF6EA; font-weight: 500; }
@@ -325,13 +330,16 @@
     <div class="controls" role="group" aria-label="More controls">
       <button data-do="flip_read">Flip + Read</button>
       <button data-do="flip_scan">Flip + Scan</button>
-      <button disabled title="Coming later">Flip + Summarise</button>
+      <button data-do="flip_summarize" data-llm>Flip + Summarise</button>
       <button data-do="flip">Flip</button>
       <button data-do="read">Read</button>
+      <button data-do="summarize" data-llm>Summarise</button>
       <button data-do="scan">Scan</button>
+      <button class="listen" id="listen" aria-pressed="false">Start listening</button>
       <button class="stop" id="stop">Stop</button>
     </div>
     <p class="status" id="status" role="status" aria-live="polite">Ready</p>
+    <p class="status" id="heard" aria-live="polite"></p>
     <div class="progress" id="progress" aria-hidden="true"><i id="bar"></i></div>
     <p class="reading" id="text"></p>
     <a id="pdf" href="/book.pdf" target="_blank" hidden>Open the scanned book (PDF)</a>
@@ -409,11 +417,124 @@
       $("status").innerHTML = (s.flipping ? "<b>Turning the page…</b>" : s.status) + (s.pages ? ` · ${s.pages} pages scanned` : "");
       $("text").textContent = s.text;
       $("pdf").hidden = !s.pdf;
-      buttons.forEach((b) => b.disabled = s.busy);
+      buttons.forEach((b) => b.disabled = s.busy || ("llm" in b.dataset && !s.llm));
+      robotSpeaking = s.speaking; llmReady = s.llm;
       if (!looked && !s.busy && s.spread_v === 0 && s.status === "Ready") { looked = true; act("look"); }
     } catch (e) { $("status").textContent = "Disconnected"; }
   }
   setInterval(poll, 700); poll();
+
+  // Voice: say "Bookworm, <command>". Uses the browser's speech recognition with the Mac's input
+  // device (System Settings > Sound > Input: pick the iPhone microphone). First match wins, so
+  // longer phrases come first ("get ready" before "read", "flip and read" before "flip").
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const COMMANDS = [
+    ["stop", "stop"], ["pause", "stop"], ["be quiet", "stop"],
+    ["flip and read", "flip_read"], ["flip and scan", "flip_scan"], ["flip and summar", "flip_summarize"],
+    ["next page", "next"], ["turn the page", "next"],
+    ["continue", "resume"], ["keep reading", "resume"], ["keep going", "resume"], ["resume", "resume"],
+    ["go on", "resume"],
+    // Chrome hears "move away" as "movie", "move it", "moo away"…
+    ["move away", "park"], ["go away", "park"], ["back off", "park"], ["park", "park"],
+    ["movie", "park"], ["moo", "park"], ["move", "park"],
+    ["come back", "ready"], ["comeback", "ready"], ["get ready", "ready"], ["come here", "ready"],
+    ["summar", "summarize"], ["flip", "flip"], ["read", "read"], ["scan", "scan"],
+  ];
+  let rec = null, listening = false, robotSpeaking = false, llmReady = false;
+  // Chrome often hears "Bookworm" as "Brooklyn" / "book worm" / "look worm".
+  const wake = (text) => text.toLowerCase().replace(/(book|look|brook)\s*worms?|brooklyn/g, "bookworm");
+  let lastStop = 0, awaitUntil = 0, settle = null;
+  function handle(said) {                                // one finished phrase
+    fetch("/heard", { method: "POST", body: said });     // shows up in the server log
+    $("heard").textContent = `“${said.trim()}”`;
+    const acted = onSpeech(said);
+    if (acted) restart();                                // fresh session per command: no repeats
+  }
+  function restart() { try { rec.abort(); } catch (_) {} }   // onend starts listening again
+  function stopNow() {                                   // also called from live (interim) text
+    if (Date.now() - lastStop < 3000) return;            // one stop per utterance
+    lastStop = Date.now();
+    fetch("/stop?voice", { method: "POST" }).then(poll);
+    $("heard").textContent = "Heard: stop";
+  }
+  function findCommand(text) {                           // the command in a phrase, or null
+    const t = wake(text), i = t.lastIndexOf("bookworm");
+    const said = i >= 0 ? t.slice(i + 8) : (Date.now() < awaitUntil ? t : "");
+    return said.trim() ? COMMANDS.find(([phrase]) => said.includes(phrase)) || null : null;
+  }
+  function onSpeech(text) {
+    const t = wake(text);
+    const i = t.lastIndexOf("bookworm");
+    let said;
+    if (i >= 0) said = t.slice(i + 8);
+    else if (Date.now() < awaitUntil) said = t;          // "Bookworm" came as its own phrase just before
+    else return;                                         // no wake word: ignore
+    if (!said.trim()) {                                  // just "Bookworm": wait for the command
+      awaitUntil = Date.now() + 6000;
+      $("heard").textContent = "Yes? (listening for a command)";
+      return;
+    }
+    awaitUntil = 0;
+    const hit = COMMANDS.find(([phrase]) => said.includes(phrase));
+    if (!hit) {
+      $("heard").textContent = `Heard “${said.trim()}” — not a command`;
+      if (!robotSpeaking) fetch("/heard?unknown", { method: "POST", body: said });
+      return;
+    }
+    const [phrase, action] = hit;
+    if (action === "stop") { stopNow(); return true; }
+    if (robotSpeaking && action !== "resume") return;    // don't obey our own voice
+    $("heard").textContent = `Heard: ${phrase}`;
+    if (action.endsWith("summarize") && !llmReady) { $("heard").textContent = "Summarise needs the OpenRouter key"; return; }
+    fetch("/do/" + action + "?voice", { method: "POST" }).then(poll);   // server answers out loud
+    return true;
+  }
+  function setListening(on) {
+    listening = on;
+    $("listen").textContent = on ? "Listening…" : "Start listening";
+    $("listen").setAttribute("aria-pressed", String(on));
+    $("heard").textContent = on ? "Say “Bookworm, …”" : "";
+  }
+  function startListening() {
+    rec = new SR();
+    rec.continuous = true; rec.interimResults = true; rec.lang = "en-US";
+    rec.onresult = (e) => {
+      for (let k = e.resultIndex; k < e.results.length; k++) {
+        const said = e.results[k][0].transcript;
+        clearTimeout(settle);
+        if (e.results[k].isFinal) {
+          handle(said);
+        } else {
+          $("heard").textContent = `… ${said.trim()}`;            // live: proves the mic is hearing
+          const t = wake(said), i = t.lastIndexOf("bookworm");
+          // Chrome only finalises a phrase after a pause, and while Bookworm is reading there
+          // is none, so act on "stop" as soon as it shows up in the live text.
+          if (i >= 0 && /\b(stop|pause|be quiet)\b/.test(t.slice(i))) { stopNow(); restart(); continue; }
+          // Chrome sometimes never finalises at all (one endless phrase), so if the live text
+          // has the wake word and stops changing for 0.7 s, treat it as said.
+          if (findCommand(said)) settle = setTimeout(() => handle(said), 700);
+        }
+      }
+    };
+    rec.onstart = () => { if (listening) $("heard").textContent = "Say “Bookworm, …”"; };
+    rec.onend = () => {                                          // the browser stops after silence: restart
+      if (listening) setTimeout(() => { try { rec.start(); } catch (_) {} }, 250);
+    };
+    rec.onerror = (e) => {
+      const why = { "not-allowed": "Microphone blocked — allow it in the address bar",
+                    "service-not-allowed": "Speech service blocked (Safari: turn on Siri/Dictation)",
+                    "audio-capture": "No microphone found — check Sound > Input",
+                    "network": "Speech recognition needs internet (Chrome uses Google)" }[e.error];
+      if (why) { setListening(false); $("heard").textContent = why; }
+      if (e.error !== "aborted" && e.error !== "no-speech") fetch("/heard", { method: "POST", body: "ERROR " + e.error });
+    };
+    rec.start(); listening = true; $("listen").textContent = "Listening…";
+    $("listen").setAttribute("aria-pressed", "true");
+  }
+  $("listen").onclick = () => {
+    if (!SR) { $("heard").textContent = "Voice needs Chrome or Safari"; return; }
+    if (listening) { setListening(false); rec.stop(); } else startListening();
+  };
 </script>
 </body>
 </html>

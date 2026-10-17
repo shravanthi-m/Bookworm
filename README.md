@@ -23,15 +23,30 @@ Both share one loop:
  (page # +2? image changed?)
 ```
 
-## Control page
+## Control page (website + voice)
 
 ```bash
-./bookworm.sh --config config/phone_mount.yaml ui           # http://localhost:8000
+./bookworm.sh --config config/phone_mount.yaml ui           # open http://localhost:8000 in Chrome
 ```
 
-`./bookworm.sh` runs Bookworm with the project's `.venv` and clears any `PYTHONPATH` from other environments (a conda/ROS `PYTHONPATH` breaks numpy). Any `python -m bookworm …` command in this README works the same through it.
+**Full guide: [docs/UI.md](docs/UI.md).** It covers what must be running first, what every button does, all voice commands, and troubleshooting.
 
-Live feed plus Flip / Read / Scan, and Flip + Read / Flip + Scan. Flip runs `ui.flip_command` in the config, so any flip script can be plugged in.
+- **Buttons:**
+  - Next page, Flip, Read, Scan, Summarise
+  - Flip + Read / Scan / Summarise
+  - Stop: halts the arm and cuts off speech
+  - Show camera
+- **Voice:** click **Start listening** and say *"Bookworm, read"*. Bookworm replies out loud, then does it. Commands:
+  - flip, next page, read, scan, summarise
+  - flip and read / scan / summarise
+  - move away, come back
+  - stop
+- **Needs:**
+  - `.env` with the Viam keys, plus `OPENROUTER_API_KEY` for Summarise
+  - `viam-server` running on Shrav's Mac, for the iPhone camera
+- **No robot?** `ui --images some/photos/` runs the whole page on photos.
+
+`./bookworm.sh` runs Bookworm with the project's `.venv` and clears any `PYTHONPATH` from other environments (a conda/ROS `PYTHONPATH` breaks numpy). Any `python -m bookworm …` command in this README works the same through it.
 
 ## Hardware
 
@@ -48,6 +63,7 @@ bookworm/
   session.py    shared capture → OCR → handler → flip → verify loop
   __main__.py   CLI
 config/default.yaml   every tunable: component names, poses, flip waypoints, thresholds
+docs/UI.md            running the control page: buttons, voice commands, troubleshooting
 docs/PLAN.md          sprint plan · docs/DIVISION.md who owns what · docs/HARDWARE.md setup + 3D prints
 tests/                run without the arm, Viam, or a camera
 ```
