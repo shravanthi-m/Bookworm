@@ -146,6 +146,8 @@ ui:
   # Command the Flip button runs, e.g. a teammate's script: "python scripts/flip.py --once".
   # null = python -m bookworm flip (with the same --config).
   flip_command: null
+  verify_flip: true         # after each flip, check with the camera that the page turned
+  flip_retries: 2           # if it didn't: "Oops, let me try again" up to this many more times
 
 run:
   blank_spreads_to_stop: 2  # consecutive blank spreads => end of book

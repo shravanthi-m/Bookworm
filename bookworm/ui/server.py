@@ -22,7 +22,7 @@ from ..llm import LlmError, make_llm, summarize
 from ..modes import Scanner, excerpt, from_top
 from ..session import RunSummary, Spread, best_of_frames
 from ..speech import make_speaker
-from ..vision import make_ocr, ocr_image, process_shot
+from ..vision import FlipOutcome, judge_flip, make_ocr, ocr_image, page_signature, process_shot
 from ..vision.page_detect import find_book_quad
 from ..vision.preprocess import rotate_frame
 
@@ -78,7 +78,10 @@ class Controller:
         self.speaker = make_speaker(cfg["speech"])
         say = getattr(self.speaker, "_say", None)
         if hasattr(say, "warm"):               # ElevenLabs: fetch the fixed replies now, play instantly later
-            say.warm(list(ACKS.values()) + ["Hang on, I'm still busy.", "Sorry, I didn't catch that."])
+            say.warm(list(ACKS.values()) + ["Hang on, I'm still busy.", "Sorry, I didn't catch that.",
+                                            "Oops, the page didn't turn. Let me try again.",
+                                            "I couldn't turn the page. Could you give me a hand?",
+                                            "Oops, I think I turned more than one page."])
         self.llm = make_llm(cfg.get("llm"))
         self.scanner = Scanner(scan_dir, cfg)
         default = [sys.executable, "-m", "bookworm"] + (["--config", config_path] if config_path else []) + ["flip"]
@@ -252,20 +255,63 @@ class Controller:
     def _ready(self):
         self._goto("ready", "Coming back…", "Ready above the page")
 
-    def _flip(self):
+    def _snapshot(self) -> dict:
+        """What the spread looks like now: page fingerprints (fast) + left page number (OCR, ~1 s)."""
+        time.sleep(0.4)                        # let the feed catch up
+        with self.lock:
+            frame = None if self.frame is None else self.frame.copy()
+        if frame is None:
+            raise RuntimeError("no camera frame yet")
+        pages = process_shot(frame, "spread", dict(self.cfg["vision"], rotate=0))
+        frac = self.cfg["vision"]["page_number_region"]
+        page_no = self.ocr.page_number(ocr_image(self.ocr, pages["left"]), frac) if "left" in pages else None
+        return {"pages": pages, "sig": {s: page_signature(p.color) for s, p in pages.items()}, "page_no": page_no}
+
+    def _flip_once(self):
         self.state.update(status="Flipping…", flipping=True)
         t0 = time.time()
         try:
             self._command(self.flip_cmd, "flip")
         finally:
             self.state["flipping"] = False
-        if self._stop.is_set():
-            self.state["status"] = "Flip stopped"
-            return
-        self.state["flip_s"] = round(time.time() - t0, 1)   # next animation matches the real arm
+        if not self._stop.is_set():
+            self.state["flip_s"] = round(time.time() - t0, 1)   # next animation matches the real arm
         if hasattr(self.camera, "advance"):    # photo playback stands in for a real flip
             self.camera.advance()
-        self.state["status"] = "Flipped"
+
+    def _flip(self):
+        """Flip, then check with the camera that exactly one page turned; if nothing turned,
+        say so and try again (ui.flip_retries times) before asking for help."""
+        ucfg = self.cfg.get("ui", {})
+        verify, retries = ucfg.get("verify_flip", True), int(ucfg.get("flip_retries", 2))
+        before = self._snapshot() if verify else None
+        for attempt in range(retries + 1):
+            self._flip_once()
+            if self._stop.is_set():
+                self.state["status"] = "Flip stopped"
+                return
+            if not verify:
+                self.state["status"] = "Flipped"
+                return
+            after = self._snapshot()
+            outcome, why = judge_flip(before, after)
+            print(f"[flip] attempt {attempt + 1}: {outcome.value} - {why}", flush=True)
+            if outcome != FlipOutcome.NO_FLIP:
+                break
+            if attempt < retries:
+                self.speaker.say("Oops, the page didn't turn. Let me try again.", resumable=False)
+                self.state["status"] = f"Page didn't turn, trying again ({attempt + 2}/{retries + 1})"
+                continue
+            self.speaker.say("I couldn't turn the page. Could you give me a hand?", resumable=False)
+            raise RuntimeError(f"the page didn't turn after {retries + 1} tries")
+        self._show(after["pages"], after["page_no"])
+        if outcome == FlipOutcome.MULTI_FLIP:
+            self.speaker.say("Oops, I think I turned more than one page.", resumable=False)
+            self.state["status"] = f"Turned more than one page ({why})"
+        elif outcome == FlipOutcome.BACKWARD:
+            self.state["status"] = f"Flipped, but {why}"
+        else:
+            self.state["status"] = "Flipped" + (f" to page {after['page_no']}" if after["page_no"] else "")
 
     def _read(self):
         self.state["status"] = "Reading…"

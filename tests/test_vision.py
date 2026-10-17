@@ -249,3 +249,32 @@ def test_word_vote_fixes_one_off_misreads():
     voted = vote(frames, backbone=0)
     assert voted == truth                                    # layout kept, each misread outvoted
     assert word_accuracy(truth, frames[0]) < word_accuracy(truth, voted) == 1.0
+
+
+def _fake_page(seed):
+    """A page of random words, like a real book page (different text = different layout)."""
+    rng = np.random.default_rng(seed)
+    words = "the a page of book worm read and to in it was that he she said little time old".split()
+    img = np.full((600, 420, 3), 235, np.uint8)
+    y = 40 + int(rng.integers(0, 12))
+    while y < 570:
+        line = " ".join(rng.choice(words, size=int(rng.integers(5, 9))))
+        cv2.putText(img, line, (25 + int(rng.integers(0, 30)), y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (30, 30, 30), 1)
+        y += 22
+    return img
+
+
+def test_judge_flip_spots_a_page_that_did_not_turn():
+    from bookworm.vision import judge_flip, page_signature
+
+    def snap(seed_l, seed_r, page_no=None, shift=0):
+        pages = {"left": _fake_page(seed_l), "right": _fake_page(seed_r)}
+        if shift:
+            pages = {s: np.roll(p, shift, axis=1) for s, p in pages.items()}
+        return {"sig": {s: page_signature(p) for s, p in pages.items()}, "page_no": page_no}
+
+    before = snap(1, 2, 10)
+    assert judge_flip(before, snap(1, 2, 10, shift=4))[0] == FlipOutcome.NO_FLIP   # camera jitter only
+    assert judge_flip(before, snap(3, 4, 12))[0] == FlipOutcome.OK
+    assert judge_flip(before, snap(3, 4, 14))[0] == FlipOutcome.MULTI_FLIP
+    assert judge_flip(before, snap(3, 4, None))[0] == FlipOutcome.OK               # no page numbers
