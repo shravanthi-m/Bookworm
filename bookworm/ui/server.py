@@ -31,7 +31,8 @@ ACTIONS = {"flip": ["flip"], "read": ["read"], "scan": ["scan"],
            "flip_read": ["flip", "read"], "flip_scan": ["flip", "scan"],
            "look": ["look"], "next": ["flip", "look"],   # look = refresh the on-screen pages, no OCR
            "summarize": ["summarize"], "flip_summarize": ["flip", "summarize"],
-           "park": ["park"], "ready": ["ready"], "resume": ["resume"]}
+           "park": ["park"], "ready": ["ready"], "resume": ["resume"],
+           "where": ["where"]}                     # where = report the arm's position, never moves
 ACKS = {"flip": "Turning the page.", "next": "Turning the page.", "read": "Okay, reading.",
         "scan": "Scanning.", "summarize": "Let me summarise.", "flip_read": "Turning the page, then reading.",
         "flip_scan": "Turning the page, then scanning.", "flip_summarize": "Turning the page, then summarising.",
@@ -216,6 +217,9 @@ class Controller:
         self._arm = conn.component(Arm, self.cfg["robot"].get("arm", "arm"))
         code, msg = goto(conn, self._arm, target)
         print(f"[arm] {msg}", flush=True)
+        if target == "where":
+            self.state["status"] = f"Arm {msg}"
+            return
         if self._stop.is_set():
             return
         if code != 0:
@@ -224,6 +228,10 @@ class Controller:
 
     def _resume(self):
         self.state["status"] = "Continuing" if self.speaker.resume() else "Nothing to continue"
+
+    def _where(self):
+        self._goto("where", "Checking the arm…", "")
+        print(f"[arm] where: {self.state['status']}", flush=True)
 
     def _park(self):
         self._goto("park", "Moving away…", "Parked")
@@ -238,8 +246,10 @@ class Controller:
             self._command(self.flip_cmd, "flip")
         finally:
             self.state["flipping"] = False
-        if not self._stop.is_set():
-            self.state["flip_s"] = round(time.time() - t0, 1)   # next animation matches the real arm
+        if self._stop.is_set():
+            self.state["status"] = "Flip stopped"
+            return
+        self.state["flip_s"] = round(time.time() - t0, 1)   # next animation matches the real arm
         if hasattr(self.camera, "advance"):    # photo playback stands in for a real flip
             self.camera.advance()
         self.state["status"] = "Flipped"
