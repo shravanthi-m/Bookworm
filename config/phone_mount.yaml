@@ -19,3 +19,7 @@ modes:
     shots: [{pose: overview, region: spread}]   # overview = arm parked out of the phone's view
   scan:
     shots: [{pose: overview, region: spread}]
+
+ui:
+  # Flip button runs Midhat's recorded flip_path (config/waypoints.yaml) instead of the book-frame flip.
+  flip_command: ".venv/bin/python scripts/flip_path.py"
