@@ -1,0 +1,671 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bookworm Dev</title>
+<style>
+  :root { --bg:#14161a; --panel:#1e2127; --line:#2e333b; --text:#e6e8eb; --dim:#9aa3ad; --accent:#4c9aff; --ok:#3ecf8e; --bad:#ff4d4f; --warn:#e0a030; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.4 system-ui, Segoe UI, sans-serif; }
+  header { display:flex; align-items:center; gap:12px; padding:10px 16px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  header h1 { font-size:16px; margin:0; font-weight:600; }
+  .pill { padding:2px 10px; border-radius:99px; background:var(--panel); border:1px solid var(--line); font-size:12px; color:var(--dim); }
+  .pill.bad { color:#fff; background:var(--bad); border-color:var(--bad); }
+  .pill.ok { color:var(--ok); }
+  main { display:grid; grid-template-columns: minmax(0,1fr) 440px; gap:16px; padding:16px; }
+  @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px; }
+  .panel h2 { margin:0 0 8px; font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--dim); }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:10px; }
+  button { background:#2a2f37; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:7px 12px; font:inherit; cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  button:disabled { opacity:.5; cursor:default; }
+  button.on { border-color:var(--accent); color:var(--accent); }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+  button.big { width:100%; padding:16px 0; font-size:18px; font-weight:700; }
+  .stopbtn { width:100%; padding:20px 0; font-size:22px; font-weight:800; letter-spacing:.08em; background:var(--bad); border-color:var(--bad); color:#fff; }
+  .stopbtn:hover { filter:brightness(1.1); }
+  input[type=range] { flex:1; min-width:120px; }
+  input[type=text], input[type=number] { background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px 8px; font:inherit; min-width:0; }
+  dl { display:grid; grid-template-columns:auto 1fr; gap:2px 12px; margin:0; font-variant-numeric:tabular-nums; }
+  dt { color:var(--dim); } dd { margin:0; text-align:right; }
+  .log { height:180px; overflow:auto; font:12px/1.5 ui-monospace, Consolas, monospace; white-space:pre-wrap; color:var(--dim); }
+  .stack > * + * { margin-top:16px; }
+  .note { color:var(--dim); font-size:12px; margin-top:8px; }
+  .tabs { display:flex; gap:4px; margin-left:8px; }
+  .tabs button.on { background:var(--panel); border-color:var(--accent); color:var(--accent); }
+  table.c { width:100%; border-collapse:collapse; font-size:12px; font-variant-numeric:tabular-nums; }
+  table.c th { text-align:left; color:var(--dim); font-weight:500; padding:2px 4px; }
+  table.c td { padding:3px 4px; border-top:1px solid var(--line); vertical-align:middle; }
+  table.c tr.sel td { background:#252b35; }
+  table.c tr[data-key] { cursor:pointer; }
+  kbd { background:var(--bg); border:1px solid var(--line); border-radius:4px; padding:0 5px; font-size:12px; }
+  [hidden] { display:none !important; }
+  .img16x9 { width:100%; aspect-ratio:16/9; background:#000; border-radius:6px; display:block; object-fit:contain; }
+  .vtabs { display:flex; gap:4px; margin-bottom:10px; flex-wrap:wrap; align-items:center; }
+  .stepper { display:grid; grid-template-columns:repeat(5, 1fr); gap:6px; }
+  .step { border:1px solid var(--line); border-radius:6px; padding:6px 8px; font-size:12px; color:var(--dim); line-height:1.25; }
+  .step span { display:block; font-size:11px; margin-top:2px; }
+  .step.running { border-color:var(--accent); color:var(--accent); animation:pulse 1.1s ease-in-out infinite; }
+  .step.ok { border-color:var(--ok); color:var(--ok); } .step.warn { border-color:var(--warn); color:var(--warn); }
+  .step.fail { border-color:var(--bad); color:var(--bad); } .step.stale { border-style:dashed; }
+  @keyframes pulse { 50% { opacity:.55; } }
+  @media (prefers-reduced-motion: reduce) { .step.running { animation:none; } }
+  .stage h2 { display:flex; align-items:center; gap:8px; }
+  .stage h2 .pill { margin-left:auto; text-transform:none; letter-spacing:0; }
+  .pill.st-ok { color:var(--ok); border-color:var(--ok); } .pill.st-warn { color:var(--warn); border-color:var(--warn); }
+  .pill.st-fail { color:#fff; background:var(--bad); border-color:var(--bad); } .pill.st-running { color:var(--accent); border-color:var(--accent); }
+  .msg { margin-top:8px; font-size:13px; } .msg:empty { display:none; }
+  .msg.warn { color:var(--warn); } .msg.fail { color:var(--bad); } .msg.ok { color:var(--ok); }
+  .pg { height:12px; background:var(--bg); border:1px solid var(--line); border-radius:99px; overflow:hidden; margin-top:6px; }
+  #pg-bar { height:100%; width:0; background:var(--accent); transition:width .5s ease, background .3s; }
+  #pg-bar.ok { background:var(--ok); } #pg-bar.fail { background:var(--bad); } #pg-bar.warn { background:var(--warn); }
+  .pg-top { display:flex; justify-content:space-between; gap:8px; align-items:baseline; }
+  .banner { display:flex; gap:10px; align-items:flex-start; padding:10px 12px; border-radius:8px; border:1px solid var(--bad); background:#3a1d1f; color:#ffd7d8; }
+  .banner.ok { border-color:var(--ok); background:#173226; color:#cdf5df; }
+  .banner span { flex:1; white-space:pre-wrap; } .banner button { padding:0 8px; }
+  .modal { position:fixed; inset:0; background:rgba(0,0,0,.55); display:flex; align-items:center; justify-content:center; z-index:50; padding:16px; }
+  .modal-box { background:var(--panel); border:1px solid var(--accent); border-radius:10px; padding:18px; max-width:520px; width:100%; }
+  .modal-box .row { margin-top:14px; justify-content:flex-end; }
+  canvas.chart { width:100%; background:var(--bg); border:1px solid var(--line); border-radius:6px; margin-top:6px; }
+  a { color:var(--accent); }
+  .v-on { color:var(--ok); } .v-early { color:var(--warn); } .v-skip { color:var(--bad); }
+  .jog { display:grid; grid-template-columns: repeat(4, 1fr); gap:6px; margin-top:10px; }
+  .jog button { padding:8px 0; }
+</style>
+</head>
+<body>
+<div id="stale" hidden style="background:var(--warn);color:#111;padding:8px 16px;font-weight:600">
+  The GUI server was started before the code changed, so new buttons will not work. Stop it (Ctrl+C in its terminal) and start it again:
+  <code>python -m bookworm gui</code></div>
+<header>
+  <h1>Bookworm Dev</h1>
+  <div class="tabs"><button id="tb-setup" class="on">Setup</button><button id="tb-monitor">Monitor</button></div>
+  <span id="p-mode" class="pill" hidden style="background:#7a4fd0;color:#fff;font-weight:700"></span>
+  <span id="p-estop" class="pill ok">motion enabled</span>
+  <span id="p-moving" class="pill" hidden>arm moving...</span>
+  <span id="p-fps" class="pill">- fps</span>
+</header>
+
+<!-- ================================ SETUP ================================ -->
+<main id="tab-setup">
+  <section class="stack">
+    <div class="panel">
+      <div class="pg-top"><b id="pg-title">Ready</b><span class="note" id="pg-time" style="margin:0"></span></div>
+      <div class="pg"><div id="pg-bar"></div></div>
+      <div class="note" id="pg-text" style="margin-top:6px">Press "Run all", or run a stage on its own.</div>
+    </div>
+    <div id="banner" class="banner" hidden><span id="banner-text"></span><button id="banner-x" title="dismiss">&times;</button></div>
+
+    <div class="panel">
+      <div class="vtabs">
+        <button id="vt-live" class="on">Live camera</button><button id="vt-capture">First capture</button>
+        <button id="vt-surface">Surface 3D</button><button id="vt-top">Top-down</button><button id="vt-prof">Cross-sections</button><button id="vt-marks">XY marks</button>
+        <span id="v-when" class="note" style="margin:0 0 0 auto"></span>
+      </div>
+      <div id="v-cam"><img id="v-img" class="img16x9" alt="camera view">
+        <div class="note">The six points are drawn from where they are in the world, so they stay on the book as the wrist camera moves. Yellow: found; green: the demo touched it at the expected height; amber: met the page early; red: skipped. Magenta +: the tool tip.</div></div>
+      <div id="v-surface" hidden>
+        <div class="row" style="margin:0 0 8px"><button id="d-ref-table" class="on">height above table</button><button id="d-ref-arm">arm z</button></div>
+        <img id="d-surf" alt="3D height surface" style="width:100%;border-radius:6px;background:#181818">
+        <div class="row">
+          <label style="display:flex;gap:6px;align-items:center;flex:1;min-width:200px">turn <input id="d-az" type="range" min="-180" max="180" value="35"></label>
+          <label style="display:flex;gap:6px;align-items:center;flex:1;min-width:200px">tilt <input id="d-el" type="range" min="10" max="90" value="40"></label>
+        </div>
+        <div class="note">Colour is height, drawn 3 times exaggerated. A dark gap is where the gripper hid the camera's view.</div>
+      </div>
+      <div id="v-top" hidden><img id="d-top" alt="top-down height map" style="max-width:100%;border-radius:6px;background:#181818">
+        <div class="note">White outline: the book as found in depth. Image up is the arm's +x, image right its -y. Grey: not seen.</div></div>
+      <div id="v-prof" hidden>
+        <div class="row" style="margin:0 0 8px"><button id="d-p-across" class="on">across the spread</button><button id="d-p-along">along the spine</button></div>
+        <canvas id="d-prof" width="900" height="360" class="chart" style="margin:0"></canvas>
+        <div class="note">Dotted line: the table. Past the book's edge the height falls to the table.</div>
+      </div>
+      <div id="v-marks" hidden>
+        <div class="row" style="margin:0 0 8px" id="xm-keys"></div>
+        <img id="xm-img" alt="photo of the marks" style="width:100%;border-radius:6px;background:#181818;cursor:crosshair">
+        <div class="note" id="xm-note">Run stage 6 (XY marking) first. Then pick a point above and click its pen mark on the photo. Yellow ring: where vision aimed; red x: your mark.</div>
+      </div>
+      <div id="d-empty" class="note" style="padding:18px 0;text-align:center" hidden>No depth scan yet - run stage 3.</div>
+    </div>
+
+    <div class="panel">
+      <h2>Touch demo results</h2>
+      <table class="c" id="demo-table"></table>
+      <canvas id="demo-chart" width="900" height="460" class="chart" hidden></canvas>
+      <img id="demo-photo" alt="side camera at the touch" hidden style="width:100%;margin-top:8px;border-radius:6px">
+      <div class="note" id="demo-note">Run stage 7 to see the robot touch every point at the height it thinks the page is.</div>
+    </div>
+  </section>
+
+  <aside class="stack">
+    <div class="panel"><button class="stopbtn" data-stop>STOP</button><button id="reset" hidden style="width:100%;margin-top:8px">Reset - re-enable motion</button>
+      <div class="note">Space or Esc anywhere also stops. This is a software stop; keep the hardware e-stop in reach.</div></div>
+
+    <div class="panel">
+      <h2>Setup</h2>
+      <div class="stepper" id="stepper"></div>
+      <div class="row"><button id="runall" class="primary">Run all</button>
+        <label><input type="checkbox" id="notouch"> stop before anything touches (stages 1-3)</label></div>
+      <div class="row">
+        <label>tool length <input id="tool" type="number" step="0.5" style="width:84px"> mm</label><button id="tool-set">Set</button>
+        <span class="note" style="margin:0">the only setting: tip below the flange (change it when a pencil is fitted)</span>
+      </div>
+    </div>
+
+    <div class="panel stage">
+      <h2>1 &middot; Home &amp; level <span class="pill" id="p-level">not run</span></h2>
+      <div class="row" style="margin-top:0"><button id="b-home">Go home</button><button id="b-level">Check level</button><span id="athome" class="pill">arm: ?</span></div>
+      <div class="msg" id="m-level"></div><dl id="dl-level"></dl>
+      <div class="note">Goes home, then reads the table's tilt in the depth image. The tilt is removed from depth in software.</div>
+    </div>
+
+    <div class="panel stage">
+      <h2>2 &middot; First capture <span class="pill" id="p-capture">not run</span></h2>
+      <div class="row" style="margin-top:0"><button id="b-capture">Capture &amp; find book</button></div>
+      <div class="msg" id="m-capture"></div><table class="c" id="pts" style="margin-top:6px"></table>
+      <div class="note">One photo from home; the book's outline gives six points: four corners and the centre of each page.</div>
+    </div>
+
+    <div class="panel stage">
+      <h2>3 &middot; Depth scan <span class="pill" id="p-depth">not run</span></h2>
+      <div class="row" style="margin-top:0"><button id="b-depth">Run depth scan</button></div>
+      <div class="msg" id="m-depth"></div><table class="c" id="d-pts" style="margin-top:6px"></table>
+      <div class="note">The camera visits six spots around home at home height (never lower) and fuses the depth views into the page's height above the table.</div>
+    </div>
+
+    <div class="panel stage">
+      <h2>4 &middot; Z link <span class="pill" id="p-zlink">not run</span></h2>
+      <div class="row" style="margin-top:0"><button id="b-zlink">Measure z link</button></div>
+      <div class="msg" id="m-zlink"></div>
+      <div id="z-live" hidden>
+        <img id="z-photo" alt="side camera view of the tool tip" style="width:100%;border-radius:6px;background:#000;margin-top:8px">
+        <div class="note" id="z-note"></div>
+        <button id="z-touch" class="primary big">It's touching</button>
+        <button id="z-skip" hidden style="margin-top:6px">Skip the page check</button>
+      </div>
+      <div class="row" style="align-items:center">
+        <span class="note" style="margin:0" id="z-spot"></span>
+        <button id="z-spot-here" style="padding:3px 8px">Lock the arm's spot</button><button id="z-spot-clear" style="padding:3px 8px">Unlock</button>
+      </div>
+      <canvas id="z-chart-table" width="900" height="460" class="chart" hidden></canvas>
+      <canvas id="z-chart-page" width="900" height="460" class="chart" hidden></canvas>
+      <dl style="margin-top:8px"><dt>table z in the arm frame</dt><dd id="z-val">-</dd></dl>
+      <div class="note">Lowers the tip in 2 mm steps onto bare table at least 80 mm from the book, reading the joint load after every step. The spot is the bare table farthest from the book, out at the edge of what the camera sees (it is locked after the first touch). When the load jumps the arm goes straight back one step (and home, if the load stays high); that height is the table's z. Then up, across, and the same on the bottom-left corner of the page (BL, 15 mm in from the edge) as a check. Charts: real tip z per step against the fitted trend; below, how far each step is off the trend for position and load. Every run is saved in data/depth/zlink/.</div>
+    </div>
+
+    <div class="panel stage">
+      <h2>5 &middot; Book model <span class="pill" id="p-model">not run</span></h2>
+      <div class="row" style="margin-top:0"><button id="b-model">Build the book model</button><a id="model-link" href="#" target="_blank" hidden>model file</a></div>
+      <div class="msg" id="m-model"></div>
+      <table class="c" id="model-touches"></table>
+      <dl id="model-dl" style="margin-top:8px"></dl>
+      <div class="note">No motion. The depth map's page heights, turned into arm z by the z link, and corrected by every place the tip has really touched the page (1-2 touches: a constant shift; 3 or more spread out: a tilted plane). The demo touches where this model puts the page, and its touches are merged back in afterwards (v2, v3, ...). Saved in data/book/: book_model.json + book_model.npz (the grid).</div>
+    </div>
+
+    <div class="panel stage">
+      <h2>6 &middot; XY marking (manual) <span class="pill" id="p-xycal">not run</span></h2>
+      <div class="row" style="margin-top:0"><button id="b-xycal">Start marking</button></div>
+      <div class="msg" id="m-xycal"></div>
+      <div id="xc-wait" hidden>
+        <div class="note" id="xc-wait-note"></div>
+        <button id="xc-next" class="primary big">Marked - next point</button>
+        <button id="xc-skip" style="margin-top:6px">Skip this point</button>
+      </div>
+      <table class="c" id="xc-table" style="margin-top:6px"></table>
+      <div class="row"><button id="xc-save" class="primary" hidden>Save the XY correction</button></div>
+      <dl style="margin-top:8px"><dt>XY correction in use</dt><dd id="xc-cur">-</dd></dl>
+      <div class="note">Optional, needs you at the table; not part of Run all. Put paper you can mark on the book if needed.
+        1) Start: the arm hovers the tip 3 mm above each point in turn (aimed with the XY correction in use).
+        2) Mark the paper exactly under the fingertip with a pen, keep your hand clear, press "Marked".
+        3) After the last point the arm goes home and takes a photo: open the viewer's "XY marks", pick each point and click its mark.
+        4) Check the table (how far each landing was from the aim) and press Save: the mean becomes part of the XY correction the demo aims with. Saved in data/calibration/.</div>
+    </div>
+
+    <div class="panel stage">
+      <h2>7 &middot; Touch demo <span class="pill" id="p-demo">not run</span></h2>
+      <div class="row" style="margin-top:0"><button id="b-plan">Check plan (no motion)</button><button id="b-demo" class="primary">Run the touch demo</button></div>
+      <div class="msg" id="m-demo"></div><div id="plan" class="note" style="white-space:pre-wrap"></div>
+      <div class="note">First the bare table far from the book, at the table's z; then each point, back to back, at exactly the page height the book model gives (corners 15 mm in from the edge). Between points the arm goes straight up to half the home height, across, and straight down. If the load jumps before that height, the page is higher than thought: the arm backs off at once and the difference is reported.</div>
+    </div>
+
+    <div class="panel"><h2>Log</h2><div class="log" id="log-s"></div></div>
+  </aside>
+</main>
+
+<!-- ================================ MONITOR ================================ -->
+<main id="tab-monitor" hidden>
+  <section class="stack">
+    <div class="panel"><h2>Wrist camera</h2><img id="view" class="img16x9" alt="live camera view">
+      <div class="row"><button id="live" class="on">Live</button></div></div>
+    <div class="panel"><h2>Log</h2><div class="log" id="log-m"></div></div>
+  </section>
+  <aside class="stack">
+    <div class="panel"><button class="stopbtn" data-stop>STOP</button></div>
+    <div class="panel">
+      <h2>Arm jog <span style="float:right;text-transform:none;letter-spacing:0">world axes, flange</span></h2>
+      <div class="row" style="margin-top:0"><span style="color:var(--dim)">step</span>
+        <button data-step="1">1 mm</button><button data-step="2">2 mm</button><button data-step="5" class="on">5 mm</button><button data-step="10">10 mm</button><button data-step="25">25 mm</button></div>
+      <div class="jog">
+        <button data-axis="x" data-sign="-1">X &minus;</button><button data-axis="x" data-sign="1">X +</button>
+        <button data-axis="y" data-sign="-1">Y &minus;</button><button data-axis="y" data-sign="1">Y +</button>
+        <button data-axis="z" data-sign="-1">Z &minus;</button><button data-axis="z" data-sign="1">Z +</button>
+        <button data-axis="theta" data-sign="-1">&theta; &minus;5&deg;</button><button data-axis="theta" data-sign="1">&theta; +5&deg;</button>
+      </div>
+      <div class="note" id="limits"></div>
+    </div>
+    <div class="panel">
+      <h2>Gripper <span id="grip-val" style="float:right;color:var(--text)">-</span></h2>
+      <div class="row" style="margin-top:0"><button data-pos="850">Open</button><button data-pos="425">Half</button><button data-pos="0">Close</button></div>
+      <div class="row"><input id="slider" type="range" min="0" max="850" step="5" value="425"><span id="slider-val" style="width:3ch;text-align:right">425</span><button id="grip-go">Go</button></div>
+    </div>
+    <div class="panel">
+      <h2>Side camera</h2>
+      <div class="row" style="margin-top:0"><button id="side-btn">Take side photo</button><span class="note" id="side-note" style="margin:0"></span></div>
+      <img id="side-img" alt="side view" hidden style="width:100%;margin-top:6px;border-radius:6px">
+    </div>
+    <div class="panel">
+      <h2>Saved poses</h2>
+      <div class="row" style="margin-top:0"><input id="pose-name" type="text" placeholder="name, e.g. home" maxlength="24" style="flex:1"><button id="pose-save">Save here</button></div>
+      <div class="row" id="pose-list"></div>
+      <div class="note">'home' goes there with a slow joint move; others move straight from where the arm is.</div>
+    </div>
+    <div class="panel"><h2>Arm pose (world, mm / deg)</h2><dl id="pose"></dl></div>
+  </aside>
+</main>
+
+<div id="modal" class="modal" hidden>
+  <div class="modal-box"><div id="modal-text" style="white-space:pre-wrap"></div>
+    <div class="row"><button id="modal-cancel">Cancel</button><button id="modal-ok" class="primary">Start</button></div></div>
+</div>
+
+<script>
+const TOKEN = "__TOKEN__", SERVER_BUILD = "__SERVER_BUILD__", DISK_BUILD = "__DISK_BUILD__";
+const $ = id => document.getElementById(id);
+const post = (url, body = {}) => fetch(url, {
+  method: "POST", headers: {"Content-Type": "application/json", "X-Token": TOKEN}, body: JSON.stringify(body)
+}).then(async r => {
+  const j = await r.json().catch(() => null);
+  if (j) return j;
+  if (r.status === 404) return {error: `the GUI server does not know ${url} - it is older than this page. Restart it: python -m bookworm gui`};
+  return {error: `the GUI server answered ${r.status} ${r.statusText} for ${url}`};
+}).catch(e => ({error: "cannot reach the GUI server (" + e + ") - is it still running?"}));
+const getj = url => fetch(url).then(r => r.json());
+
+function notify(msg, kind = "bad") {
+  const b = $("banner"); b.className = "banner " + (kind === "ok" ? "ok" : ""); $("banner-text").textContent = msg; b.hidden = false;
+  if (kind === "ok") setTimeout(() => { if ($("banner-text").textContent === msg) b.hidden = true; }, 8000);
+}
+$("banner-x").onclick = () => { $("banner").hidden = true; };
+function askConfirm(text, ok = "Start") {
+  return new Promise(res => {
+    $("modal-text").textContent = text; $("modal-ok").textContent = ok; $("modal").hidden = false;
+    const done = v => { $("modal").hidden = true; res(v); };
+    $("modal-ok").onclick = () => done(true); $("modal-cancel").onclick = () => done(false);
+  });
+}
+
+// ---- safety
+async function stop() { $("p-estop").textContent = "STOPPING..."; await post("/api/stop"); refresh(); }
+document.querySelectorAll("[data-stop]").forEach(b => b.onclick = stop);
+addEventListener("keydown", e => { if ((e.key === " " || e.key === "Escape") && e.target.tagName !== "INPUT") { e.preventDefault(); stop(); } });
+$("reset").onclick = async () => { await post("/api/reset"); refresh(); };
+
+// ---- tabs
+let tab = "setup";
+function showTab(name) {
+  tab = name;
+  $("tab-setup").hidden = name !== "setup"; $("tab-monitor").hidden = name !== "monitor";
+  $("tb-setup").classList.toggle("on", name === "setup"); $("tb-monitor").classList.toggle("on", name === "monitor");
+  if (name === "setup") { flowRefresh(); depthRefresh(true); }
+}
+$("tb-setup").onclick = () => showTab("setup"); $("tb-monitor").onclick = () => showTab("monitor");
+
+// ---- monitor: camera, jog, gripper, side camera, poses
+const view = $("view");
+function nextFrame() { if (tab !== "monitor") { setTimeout(nextFrame, 400); return; } view.src = "/frame.jpg?" + Date.now(); }
+view.onload = () => setTimeout(nextFrame, 60); view.onerror = () => setTimeout(nextFrame, 500); nextFrame();
+let liveOn = true;
+$("live").onclick = async () => { liveOn = !liveOn; await post("/api/live", {on: liveOn}); $("live").classList.toggle("on", liveOn); };
+let jogStep = 5;
+document.querySelectorAll("[data-step]").forEach(b => b.onclick = () => { jogStep = +b.dataset.step; document.querySelectorAll("[data-step]").forEach(c => c.classList.toggle("on", c === b)); });
+document.querySelectorAll("[data-axis]").forEach(b => b.onclick = async () => {
+  const axis = b.dataset.axis, delta = (axis === "theta" ? 5 : jogStep) * +b.dataset.sign;
+  const r = await post("/api/jog", {axis, delta}); if (r.error) notify(r.error); refresh();
+});
+document.querySelectorAll("[data-pos]").forEach(b => b.onclick = async () => { const r = await post("/api/gripper", {position: +b.dataset.pos}); if (r.error) notify(r.error); });
+$("slider").oninput = () => $("slider-val").textContent = $("slider").value;
+$("grip-go").onclick = async () => { const r = await post("/api/gripper", {position: +$("slider").value}); if (r.error) notify(r.error); };
+$("side-btn").onclick = async () => {
+  $("side-note").textContent = "taking photo...";
+  const q = await post("/api/side"); if (q.error) { $("side-note").textContent = q.error; return; }
+  $("side-note").textContent = q.name; $("side-img").hidden = false; $("side-img").src = "/side/" + q.name;
+};
+$("pose-save").onclick = async () => { const r = await post("/api/pose/save", {name: $("pose-name").value}); if (r.error) notify(r.error); refresh(); };
+async function goPose(name) {
+  if (!(await askConfirm(`Move the arm to '${name}'? Make sure the path is clear.`, "Go"))) return;
+  const r = await post("/api/pose/go", {name}); if (r.error) notify(r.error); refresh();
+}
+
+// ---- setup viewer
+let vmode = "live", dep = null, depSig = "", depRef = "table", profKind = "across";
+const vimg = $("v-img");
+function vLoop() {
+  if (tab !== "setup" || !["live", "capture"].includes(vmode)) { setTimeout(vLoop, 500); return; }
+  vimg.src = "/setup/view.jpg?mode=" + vmode + "&t=" + Date.now();
+}
+vimg.onload = () => setTimeout(vLoop, vmode === "live" ? 80 : 1500); vimg.onerror = () => setTimeout(vLoop, 800); vLoop();
+function setView(v) {
+  vmode = v;
+  for (const k of ["live", "capture", "surface", "top", "prof", "marks"]) $("vt-" + k).classList.toggle("on", k === v);
+  $("v-cam").hidden = !["live", "capture"].includes(v);
+  for (const k of ["surface", "top", "prof", "marks"]) $("v-" + k).hidden = k !== v;
+  if (v === "marks") marksImg();
+  depthShow();
+}
+for (const k of ["live", "capture", "surface", "top", "prof", "marks"]) $("vt-" + k).onclick = () => setView(k);
+
+// ---- XY marking: pick a point, click its pen mark on the photo
+let markKey = null;
+function marksImg() { $("xm-img").src = "/xycal/photo.jpg?t=" + Date.now(); }
+function renderMarkKeys(x) {
+  const keys = Object.keys((x && x.hovered) || {});
+  if (!keys.includes(markKey)) markKey = keys.find(k => !(x.clicks || {})[k]) || keys[0] || null;
+  $("xm-keys").innerHTML = keys.map(k => `<button data-k="${k}" class="${k === markKey ? "on" : ""}">${k}${(x.clicks || {})[k] ? " &#10003;" : ""}</button>`).join("");
+  document.querySelectorAll("#xm-keys button").forEach(b => b.onclick = () => { markKey = b.dataset.k; renderMarkKeys(x); });
+  $("xm-note").textContent = !x || !x.has_photo ? "Run stage 6 (XY marking) first." :
+    markKey ? `Click the pen mark for ${LABEL[markKey]} (${markKey}). Yellow ring: where vision aimed; red x: your mark.` : "";
+}
+$("xm-img").onclick = async e => {
+  if (!markKey) return;
+  const im = $("xm-img"), r = im.getBoundingClientRect();
+  const u = (e.clientX - r.left) * im.naturalWidth / r.width, v = (e.clientY - r.top) * im.naturalHeight / r.height;
+  const q = await post("/api/xycal/mark", {key: markKey, u, v}); if (q.error) { notify(q.error); return; }
+  marksImg(); await flowRefresh();
+  const x = fl && fl.xycal, next = Object.keys(x.hovered).find(k => !x.clicks[k]); if (next) { markKey = next; renderMarkKeys(x); }
+};
+function depthImgs() {
+  const q = "ref=" + depRef + "&t=" + Date.now();
+  if (vmode === "surface") $("d-surf").src = "/depth/surface.png?az=" + $("d-az").value + "&el=" + $("d-el").value + "&" + q;
+  if (vmode === "top") $("d-top").src = "/depth/top.png?" + q;
+}
+function depthShow() {
+  const has = dep && dep.has_scan, dview = ["surface", "top", "prof"].includes(vmode);
+  $("d-empty").hidden = !dview || has; $("d-surf").hidden = $("d-top").hidden = !has;
+  if (has && dview) { depthImgs(); if (vmode === "prof") drawProf(); }
+}
+let surfTimer = null;
+const surfSoon = () => { clearTimeout(surfTimer); surfTimer = setTimeout(depthImgs, 60); };
+$("d-az").oninput = surfSoon; $("d-el").oninput = surfSoon;
+function setRef(r) { depRef = r; $("d-ref-table").classList.toggle("on", r === "table"); $("d-ref-arm").classList.toggle("on", r === "arm"); depthShow(); }
+$("d-ref-table").onclick = () => setRef("table"); $("d-ref-arm").onclick = () => setRef("arm");
+function setProf(k) { profKind = k; $("d-p-across").classList.toggle("on", k === "across"); $("d-p-along").classList.toggle("on", k === "along"); drawProf(); }
+$("d-p-across").onclick = () => setProf("across"); $("d-p-along").onclick = () => setProf("along");
+function drawProf() {
+  const cv = $("d-prof"), g = cv.getContext("2d"), W = cv.width, H = cv.height, css = getComputedStyle(document.documentElement);
+  g.clearRect(0, 0, W, H);
+  if (!dep || !dep.has_scan) return;
+  const P = dep.profiles[profKind], off = depRef === "arm" ? dep.table_z : 0;
+  const lo = -12 + off, hi = 70 + off, L = 52, R = 14, T = 12, B = 54;
+  const X = i => L + (i / (P.axis.length - 1)) * (W - L - R), Y = v => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
+  g.font = "13px system-ui"; g.fillStyle = css.getPropertyValue("--dim"); g.strokeStyle = css.getPropertyValue("--line"); g.lineWidth = 1;
+  for (let v = Math.ceil(lo / 10) * 10; v <= hi; v += 10) { g.beginPath(); g.moveTo(L, Y(v)); g.lineTo(W - R, Y(v)); g.stroke(); g.fillText(v, 14, Y(v) + 4); }
+  g.setLineDash([4, 4]); g.strokeStyle = css.getPropertyValue("--dim"); g.beginPath(); g.moveTo(L, Y(off)); g.lineTo(W - R, Y(off)); g.stroke(); g.setLineDash([]);
+  const cols = ["#4c9aff", "#ff9f43", "#3ecf8e"];
+  P.lines.forEach((ln, k) => {
+    g.strokeStyle = cols[k % 3]; g.lineWidth = 2; g.beginPath(); let pen = false;
+    ln.at.forEach((v, i) => { if (v === null || v > 70 || v < -12) { pen = false; return; } const y = Y(v + off); if (!pen) { g.moveTo(X(i), y); pen = true; } else g.lineTo(X(i), y); });
+    g.stroke(); g.fillStyle = cols[k % 3]; g.fillText(ln.name, L + 4 + k * 150, H - 10);
+  });
+}
+async function depthRefresh(force) {
+  let d; try { d = await getj("/api/depth"); } catch { return; }
+  dep = d;
+  const sig = JSON.stringify([d.taken, d.has_scan, d.table_z]);
+  if (force || sig !== depSig) { depSig = sig; depthShow(); }
+  $("d-pts").innerHTML = d.has_scan ? "<tr><th>point</th><th>above table</th><th>arm z</th></tr>" + d.points.map(p =>
+    `<tr><td>${p.name}</td><td>${p.h === null ? "-" : p.h.toFixed(1)} mm</td><td>${p.h === null ? "-" : (p.h + d.table_z).toFixed(1)} mm</td></tr>`).join("") : "";
+}
+
+// ---- charts: real tip z per step against the fitted trend; below, standard deviations off the trend
+function drawZChart(cv, title, tr, expected, thrPos, thrLoad) {
+  const g = cv.getContext("2d"), W = cv.width, H = cv.height, css = getComputedStyle(document.documentElement);
+  const dim = css.getPropertyValue("--dim"), line = css.getPropertyValue("--line"), acc = css.getPropertyValue("--accent"), BAD = "#ff4d4f", OK = "#3ecf8e", ORG = "#ff9f43";
+  g.clearRect(0, 0, W, H); g.font = "25px system-ui";
+  if (!tr || !tr.length) return;
+  const L = 84, R = 20, n = Math.max(tr.length + 1, 6), X = i => L + (i / (n - 1)) * (W - L - R);
+  const topH = H * 0.58, T1 = 40, B1 = topH - 8, T2 = topH + 58, B2 = H - 40;
+  const zs = tr.flatMap(t => [t.cmd, t.meas]).concat(expected == null ? [] : [expected]);
+  const lo = Math.min(...zs) - 2, hi = Math.max(...zs) + 2, Y1 = v => B1 - (v - lo) / (hi - lo) * (B1 - T1);
+  g.fillStyle = dim; g.fillText(title + " - tip z (mm)", L, 26);
+  g.strokeStyle = line; g.lineWidth = 1;
+  const sv = (hi - lo) > 40 ? 10 : (hi - lo) > 16 ? 5 : 2;
+  for (let v = Math.ceil(lo / sv) * sv; v <= hi; v += sv) { g.beginPath(); g.moveTo(L, Y1(v)); g.lineTo(W - R, Y1(v)); g.stroke(); g.fillStyle = dim; g.fillText(v, 18, Y1(v) + 8); }
+  if (expected != null) { g.setLineDash([6, 4]); g.strokeStyle = OK; g.beginPath(); g.moveTo(L, Y1(expected)); g.lineTo(W - R, Y1(expected)); g.stroke(); g.setLineDash([]); g.fillStyle = OK; g.fillText("expected surface " + expected, L + 10, Y1(expected) - 9); }
+  g.strokeStyle = dim; g.lineWidth = 1.5; g.beginPath(); tr.forEach((t, i) => { i ? g.lineTo(X(i), Y1(t.cmd)) : g.moveTo(X(i), Y1(t.cmd)); }); g.stroke();
+  tr.forEach((t, i) => {
+    if (t.pred == null) return;
+    g.fillStyle = "rgba(76,154,255,.22)"; g.fillRect(X(i) - 14, Y1(t.pred + t.band), 28, Y1(t.pred - t.band) - Y1(t.pred + t.band));
+  });
+  tr.forEach((t, i) => {
+    const hit = t.flags && (t.flags.fixed || t.flags.pos || t.flags.load);
+    g.fillStyle = hit ? BAD : acc; g.beginPath(); g.arc(X(i), Y1(t.meas), hit ? 11 : 7, 0, 6.3); g.fill();
+    g.fillStyle = dim; g.fillText(i, X(i) - 6, B1 + 26);
+  });
+  const sc = [thrPos, thrLoad], top = Math.max(...sc, ...tr.flatMap(t => [t.pos_z || 0, t.load_z || 0]).map(v => Math.min(v, 4 * Math.max(...sc)))) * 1.1;
+  const Y2 = v => B2 - Math.max(0, Math.min(v, top)) / top * (B2 - T2);
+  g.strokeStyle = line; g.lineWidth = 1; g.strokeRect(L, T2, W - L - R, B2 - T2);
+  g.fillStyle = dim; g.fillText("std devs off the trend", L, T2 - 14); g.fillText("0", 50, B2 + 8); g.fillText(top.toFixed(0), 30, T2 + 16);
+  [[thrPos, acc, "position limit"], [thrLoad, ORG, "load limit"]].forEach(([v, c, nm], k) => {
+    g.setLineDash([5, 4]); g.strokeStyle = c; g.beginPath(); g.moveTo(L, Y2(v)); g.lineTo(W - R, Y2(v)); g.stroke(); g.setLineDash([]); g.fillStyle = c; g.fillText(nm + " " + v, L + 12 + k * 260, Y2(v) + 26);
+  });
+  [["pos_z", acc], ["load_z", ORG]].forEach(([key, c]) => {
+    g.strokeStyle = c; g.lineWidth = 3; g.beginPath(); let pen = false;
+    tr.forEach((t, i) => { if (t[key] == null) { pen = false; return; } pen ? g.lineTo(X(i), Y2(t[key])) : g.moveTo(X(i), Y2(t[key])); pen = true; });
+    g.stroke(); g.fillStyle = c; tr.forEach((t, i) => { if (t[key] != null) { g.beginPath(); g.arc(X(i), Y2(t[key]), 6, 0, 6.3); g.fill(); } });
+  });
+  g.fillStyle = dim; g.fillText("step", W / 2 - 30, H - 8);
+}
+
+// ---- stages
+const LABEL = {cl: "Left page centre", cr: "Right page centre", tl: "Top-left corner", tr: "Top-right corner", br: "Bottom-right corner", bl: "Bottom-left corner",
+  tbl: "Bare table (far from the book)"};
+const STATE_TXT = {idle: "not run", running: "running...", ok: "done", warn: "done - check", fail: "failed", stale: "out of date"};
+const STAGE_LABEL = {level: "Home & level", capture: "First capture", depth: "Depth scan", zlink: "Z link", model: "Book model", xycal: "XY marking", demo: "Touch demo"};
+const WHAT = {
+  level: "Go home (slowly) if not there, then read the table's tilt from the depth image?",
+  capture: "Take the first capture from home and find the book's six points?",
+  depth: "Move the camera slowly over six spots around home at home height (never lower), then back home, and build the height map?",
+  xycal: "Hover the tool tip 3 mm above each of the six points in turn and wait at each one while you mark the paper under it with a pen. Keep your hand clear while the arm moves; press STOP if anything looks wrong.",
+  zlink: "Lower the tool tip slowly onto bare table far from the book (at the edge of the camera's view) in 2 mm steps, then onto the bottom-left corner of the page (BL). When the joint load jumps the arm goes straight back one step. Keep clear and ready to press STOP.",
+  model: "Merge the depth map, the z link and the page touches into the book model and save it? Nothing moves.",
+  demo: "Touch every point, back to back, at exactly the page height the book model gives. The arm moves slowly over the book. Keep clear and ready to press STOP.",
+};
+let fl = null, lastStates = {}, shownKey = "", shownStep = 0, demoSel = null;
+async function runStage(id) {
+  if (!(await askConfirm(WHAT[id]))) return;
+  const q = await post("/api/flow/stage", {id, confirm: true}); if (q.error) notify(q.error);
+  flowRefresh();
+}
+["level", "capture", "depth", "zlink", "model", "xycal", "demo"].forEach(id => $("b-" + id).onclick = () => runStage(id));
+$("runall").onclick = async () => {
+  const no = $("notouch").checked;
+  const ok = await askConfirm("Run in order:\n  1 home & level\n  2 first capture\n  3 depth scan" +
+    (no ? "\n(stops there: nothing touches)" : "\n  4 z link (skipped if already measured with this tool)\n  5 book model (no motion)\n  7 touch demo (6, XY marking, is manual: run it on its own)") +
+    "\n\nThe arm moves slowly. Keep clear and ready to press STOP.", "Run all");
+  if (!ok) return;
+  const q = await post("/api/flow/run", {confirm: true, skip_touch: no}); if (q.error) notify(q.error); flowRefresh();
+};
+$("b-home").onclick = async () => {
+  if (!(await askConfirm("Move the arm to home (slow joint move)? Make sure the path is clear.", "Go home"))) return;
+  const q = await post("/api/pose/go", {name: "home"}); if (q.error) notify(q.error);
+};
+$("tool-set").onclick = async () => {
+  const v = +$("tool").value;
+  if (!(await askConfirm(`Set the tool length to ${v} mm? The z link will need measuring again.`, "Set"))) return;
+  const q = await post("/api/tool", {tool_length_mm: v}); if (q.error) notify(q.error); else notify("Tool length set to " + v + " mm.", "ok"); flowRefresh();
+};
+$("z-spot-here").onclick = async () => {
+  if (!(await askConfirm("Lock the z link's table spot to where the tool tip is now (x, y)? Jog the arm over clear table first, well away from the book.", "Lock"))) return;
+  const q = await post("/api/zlink/spot", {here: true}); if (q.error) notify(q.error); else notify("Table spot locked at (" + q.lock.join(", ") + ")", "ok"); flowRefresh();
+};
+$("z-spot-clear").onclick = async () => { const q = await post("/api/zlink/spot", {clear: true}); if (q.error) notify(q.error); flowRefresh(); };
+$("z-touch").onclick = async () => {
+  if (!shownStep) { notify("Wait for the first photo to appear."); return; }
+  const q = await post("/api/flow/contact", {step: shownStep}); if (q.error) notify(q.error); else notify("Recorded at the photo you were looking at.", "ok");
+};
+$("z-skip").onclick = async () => { const q = await post("/api/flow/contact", {step: 0}); if (q.error) notify(q.error); };
+$("b-plan").onclick = async () => {
+  const q = await post("/api/demo/plan"); if (q.error) { $("plan").textContent = q.error; return; }
+  $("plan").textContent = q.points.map(p => LABEL[p.key] + ": " + (p.skip ? "SKIP - " + p.skip : `touch at (${p.aim.join(", ")}), page z ${p.z} mm`)).join("\n")
+    + "\n" + (q.table_measured ? `table z ${q.table_z} mm` : "z link not measured yet") + (q.xy_offset ? `, XY correction (${q.xy_offset.join(", ")}) mm` : "");
+};
+
+function afterStage(id) {
+  if (id === "capture") setView("capture");
+  if (id === "depth") { depthRefresh(true).then(() => setView("surface")); }
+  if (id === "demo") setView("capture");
+  if (id === "xycal") setView("marks");
+}
+$("xc-next").onclick = async () => { const q = await post("/api/xycal/next", {}); if (q.error) notify(q.error); flowRefresh(); };
+$("xc-skip").onclick = async () => { const q = await post("/api/xycal/next", {skip: true}); if (q.error) notify(q.error); flowRefresh(); };
+$("xc-save").onclick = async () => {
+  const s = fl && fl.xycal && fl.xycal.summary; if (!s) return;
+  if (!(await askConfirm(`Set the XY correction to (${s.new_offset_mm.join(", ")}) mm from ${s.n} mark(s)? The demo will aim with it.`, "Save"))) return;
+  const q = await post("/api/xycal/save", {}); if (q.error) notify(q.error); else notify("XY correction saved.", "ok"); flowRefresh();
+};
+function renderXycal(f) {
+  const x = f.xycal || {}, s = x.summary, c = x.calibration;
+  $("xc-wait").hidden = !x.waiting;
+  if (x.waiting) $("xc-wait-note").textContent = `The tip is 3 mm above ${LABEL[x.waiting]}: mark the paper exactly under the fingertip, take your hand away, then press "Marked".`;
+  const f1 = v => (v > 0 ? "+" : "") + v.toFixed(1);
+  $("xc-table").innerHTML = s ? "<tr><th>point</th><th>landed off the aim (x, y mm)</th></tr>" +
+    Object.entries(s.points).map(([k, p]) => `<tr><td>${LABEL[k]}</td><td>${f1(p.d_mm[0])}, ${f1(p.d_mm[1])}</td></tr>`).join("") +
+    `<tr><td><b>mean</b></td><td><b>${f1(s.mean_mm[0])}, ${f1(s.mean_mm[1])}</b> (rms ${s.rms_mm}, spread ${s.spread_mm}) &rarr; new correction (${s.new_offset_mm.join(", ")})</td></tr>` : "";
+  $("xc-save").hidden = !s;
+  $("xc-cur").textContent = c && c.offset_mm ? `(${c.offset_mm.join(", ")}) mm` + (c.saved_in ? " - " + c.saved_in : "") : "none (the arm aims where vision says)";
+  renderMarkKeys(x);
+}
+function renderFlow(f) {
+  fl = f;
+  $("stepper").innerHTML = f.stages.map((s, i) => `<div class="step ${s.state}"><b>${i + 1}</b> ${s.label}<span>${STATE_TXT[s.state]}</span></div>`).join("");
+  for (const s of f.stages) {
+    const p = $("p-" + s.id); p.textContent = STATE_TXT[s.state]; p.className = "pill st-" + s.state;
+    const m = $("m-" + s.id); m.textContent = s.msg || ""; m.className = "msg " + s.state;
+    if (lastStates[s.id] === "running" && (s.state === "ok" || s.state === "warn")) afterStage(s.id);
+    if (lastStates[s.id] === "running" && s.state === "fail") notify(STAGE_LABEL[s.id] + " failed: " + s.msg);
+    lastStates[s.id] = s.state;
+  }
+  const lv = (f.stages.find(s => s.id === "level") || {}).data;
+  $("dl-level").innerHTML = lv ? `<dt>table tilt in depth</dt><dd>${lv.table_tilt_deg} deg</dd><dt>camera vs table normal</dt><dd>${lv.camera_vs_table_deg} deg</dd><dt>tool off vertical</dt><dd>${lv.tool_off_vertical_deg} deg</dd>` : "";
+  const ah = $("athome"); ah.textContent = f.has_home ? (f.at_home ? "arm: at home" : "arm: not at home") : "no home saved"; ah.className = "pill " + (f.at_home ? "ok" : "");
+  $("pts").innerHTML = f.points.length ? "<tr><th>point</th><th>world x, y, z (mm)</th></tr>" + f.points.map(p => `<tr><td>${p.label}</td><td>${p.world ? p.world.join(", ") : "-"}</td></tr>`).join("") : "";
+  $("v-when").textContent = f.capture_taken ? "first capture " + f.capture_taken : "no capture yet";
+  if (document.activeElement !== $("tool")) $("tool").value = f.tool_length_mm;
+  $("z-val").textContent = f.table_measured ? `${f.table_z} mm (${f.table_measured_at}, ${f.z_link_tool_length_mm ?? "?"} mm tool)` : "not measured";
+  $("z-spot").textContent = f.z_link_spot_lock ? "table spot locked at (" + f.z_link_spot_lock.map(Math.round).join(", ") + ")" : "table spot: picked automatically";
+  $("z-spot-clear").hidden = !f.z_link_spot_lock;
+  renderProgress(f); renderLive(f); renderDemo(f); renderModel(f); renderXycal(f);
+  const busy = f.moving || f.estop;
+  ["runall", "b-home", "b-level", "b-capture", "b-depth", "b-zlink", "b-model", "b-xycal", "b-demo", "tool-set", "z-spot-here"].forEach(id => $(id).disabled = busy);
+}
+function renderProgress(f) {
+  const pr = f.progress, bar = $("pg-bar");
+  if (!pr) { $("pg-title").textContent = "Ready"; bar.style.width = "0"; bar.className = ""; return; }
+  const states = pr.ids.map(id => (f.stages.find(s => s.id === id) || {}).state);
+  const failedAt = pr.ids.find(id => (f.stages.find(s => s.id === id) || {}).state === "fail");
+  const running = f.running !== null;
+  const frac = running ? (pr.n + pr.sub) / pr.of : (failedAt ? pr.ids.indexOf(failedAt) / pr.of : 1);
+  let title, text = pr.text || "", cls = "";
+  if (running) title = "Stage " + (pr.n + 1) + " of " + pr.of + ": " + STAGE_LABEL[pr.stage];
+  else if (failedAt) { title = "Stopped at " + STAGE_LABEL[failedAt]; text = (f.stages.find(s => s.id === failedAt) || {}).msg; cls = "fail"; }
+  else { title = pr.ids.length > 1 ? "All stages finished" : STAGE_LABEL[pr.ids[0]] + " finished"; text = states.includes("warn") ? "finished - check the stages marked 'done - check'" : ""; cls = states.includes("warn") ? "warn" : "ok"; }
+  $("pg-title").textContent = title; $("pg-text").textContent = text; bar.style.width = Math.round(frac * 100) + "%"; bar.className = cls;
+  $("pg-time").textContent = Math.max(0, Math.round((pr.finished || f.now) - pr.t0)) + " s";
+}
+function renderLive(f) {
+  const h = f.live || {}, tr = h.traces || {};
+  for (const k of ["table", "page"]) {
+    const cv = $("z-chart-" + k); cv.hidden = !(tr[k] && tr[k].length);
+    if (!cv.hidden) drawZChart(cv, k === "table" ? "Bare table (far from the book)" : "Page at bottom-left (BL)", tr[k], (h.expected || {})[k], h.k || 5, h.load_k || 8);
+  }
+  const zl = h.active && (h.key === "table" || h.key === "page");
+  $("z-live").hidden = !zl;
+  if (!zl) return;
+  $("z-skip").hidden = h.key !== "page";
+  $("z-note").textContent = (h.label || "") + " - step " + h.step + " of " + h.of + ": tip at z " + h.tip_z + " mm" + (h.stall ? " - " + h.stall : "");
+  const key = h.key + ":" + h.step;
+  if (h.photo && key !== shownKey) { const img = $("z-photo"); img.onload = () => { shownStep = h.step; shownKey = key; }; img.src = "/side/" + h.photo; }
+}
+function renderModel(f) {
+  const m = f.model;
+  $("model-link").hidden = !m;
+  if (!m) { $("model-touches").innerHTML = ""; $("model-dl").innerHTML = ""; return; }
+  $("model-link").href = "/book_model.json"; $("model-link").textContent = "model v" + m.version + " (json)";
+  const nm = k => LABEL[k] || (k === "table" ? "Bare table" : k);
+  const f1 = v => v == null ? "-" : (v > 0 ? "+" : "") + v.toFixed(1);
+  $("model-touches").innerHTML = "<tr><th>touch</th><th>kind</th><th>touched z</th><th>depth map z</th><th>off by</th><th>after fit</th></tr>" +
+    m.touches.map(t => `<tr><td>${nm(t.key)}</td><td>${t.kind === "demo" ? "demo (" + t.verdict + ")" : t.kind.replace("_", " ")}</td><td>${t.z.toFixed(1)}</td>
+      <td>${t.depth_z == null ? "-" : t.depth_z.toFixed(1)}</td><td>${f1(t.residual)}</td><td>${f1(t.after)}</td></tr>`).join("");
+  const c = m.correction, pg = m.pages || {};
+  const corr = c.kind === "none" ? "none (no page touch)" : c.kind === "constant" ? `constant ${f1(c.a)} mm (${c.n} touch${c.n > 1 ? "es" : ""})`
+    : `plane through ${c.n} touches: ${f1(c.a)} mm ${f1(c.b * 100)} mm per 100 mm in x, ${f1(c.c * 100)} in y`;
+  $("model-dl").innerHTML = `<dt>table z</dt><dd>${m.table_z} mm</dd><dt>correction</dt><dd>${corr}</dd>` +
+    (c.rms_before != null ? `<dt>page touches vs model</dt><dd>${c.rms_before} mm rms before, ${c.rms_after} after</dd>` : "") +
+    Object.entries(pg).map(([k, p]) => `<dt>${k} page plane</dt><dd>z ${p.z_mid} mm, tilt ${p.tilt_deg} deg, ${p.rms_mm} mm rms from flat (max ${p.max_off_mm})</dd>`).join("");
+}
+function renderDemo(f) {
+  const d = f.demo || {}, res = d.results || {}, keys = d.order || [], tr = (f.live || {}).traces || {};
+  const live = f.live && f.live.active && LABEL[f.live.key] ? f.live.key : null;
+  if (live) demoSel = live;
+  if (!keys.length) { $("demo-table").innerHTML = ""; $("demo-chart").hidden = $("demo-photo").hidden = true; return; }
+  $("demo-note").textContent = d.taken ? "demo run " + d.taken + (f.xy_offset ? " - XY correction (" + f.xy_offset.join(", ") + ") mm applied" : "") : "";
+  $("demo-table").innerHTML = "<tr><th>point</th><th>page z (mm)</th><th>result</th><th></th></tr>" + keys.map(k => {
+    const r = res[k];
+    const txt = !r ? (k === live ? "touching..." : "waiting") : r.verdict === "on" ? "touched at the expected height"
+      : r.verdict === "early" ? `met the page ${r.early_mm > 0 ? "+" : ""}${r.early_mm} mm from it (${r.how})` + (r.retreat === "home" ? ", backed out home" : "") : "skipped: " + r.why;
+    return `<tr data-key="${k}" class="${k === demoSel ? "sel" : ""}"><td>${LABEL[k]}</td><td>${r && r.expected_z != null ? r.expected_z : "-"}</td>
+      <td class="v-${r ? r.verdict : ""}">${txt}</td><td>${r && r.photo ? `<a href="/side/${r.photo}" target="_blank">photo</a>` : ""}</td></tr>`;
+  }).join("");
+  document.querySelectorAll("#demo-table tr[data-key]").forEach(row => row.onclick = e => { if (e.target.tagName !== "A") { demoSel = row.dataset.key; renderDemo(fl); } });
+  if (!demoSel || !tr[demoSel]) demoSel = keys.filter(k => tr[k]).slice(-1)[0] || null;
+  const cv = $("demo-chart"); cv.hidden = !(demoSel && tr[demoSel]);
+  if (!cv.hidden) drawZChart(cv, LABEL[demoSel], tr[demoSel], (f.live.expected || {})[demoSel], f.live.k || 5, f.live.load_k || 8);
+  const ph = res[demoSel] && res[demoSel].photo; $("demo-photo").hidden = !ph;
+  if (ph && !$("demo-photo").src.endsWith(ph)) $("demo-photo").src = "/side/" + ph;
+}
+async function flowRefresh() { try { renderFlow(await getj("/api/flow")); } catch { /* server busy */ } }
+setInterval(() => { if (tab === "setup") flowRefresh(); }, 600);
+setInterval(() => { if (tab === "setup") depthRefresh(false); }, 2500);
+
+// ---- status (both tabs)
+async function refresh() {
+  let s;
+  try { s = await getj("/api/status"); } catch { $("p-estop").textContent = "server not reachable"; $("p-estop").className = "pill bad"; return; }
+  $("p-estop").textContent = s.estop ? "STOPPED" : "motion enabled"; $("p-estop").className = "pill " + (s.estop ? "bad" : "ok");
+  $("reset").hidden = !s.estop;
+  $("p-mode").hidden = !s.robot_mode || s.robot_mode === "real";
+  $("p-mode").textContent = s.robot_mode === "sim" ? "SIMULATION - no real arm" : "REPLAY of recorded views - no real arm";
+  $("p-fps").textContent = `${s.fps} fps`; $("p-moving").hidden = !s.moving;
+  document.querySelectorAll(".jog button, #pose-list button").forEach(b => b.disabled = s.estop || s.moving);
+  const L = s.limits; $("limits").textContent = `limits (mm): x ${L.x.join("..")}  y ${L.y.join("..")}  z ${L.z.join("..")} - jog is refused outside these and below the tip floor`;
+  const pl = $("pose-list"), key = s.saved_poses.join("|");
+  if (pl.dataset.key !== key) {
+    pl.dataset.key = key; pl.innerHTML = s.saved_poses.length ? "" : '<span class="note">none saved yet</span>';
+    s.saved_poses.forEach(n => { const b = document.createElement("button"); b.textContent = "Go: " + n; b.onclick = () => goPose(n); pl.appendChild(b); });
+  }
+  $("grip-val").textContent = s.gripper == null ? "-" : Math.round(s.gripper);
+  $("pose").innerHTML = s.pose ? Object.entries(s.pose).map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("") : "<dt>-</dt><dd></dd>";
+  for (const id of ["log-s", "log-m"]) {
+    const el = $(id), atEnd = el.scrollTop + el.clientHeight >= el.scrollHeight - 5;
+    el.textContent = s.log.join("\n"); if (atEnd) el.scrollTop = el.scrollHeight;
+  }
+}
+setInterval(refresh, 500);
+refresh(); flowRefresh(); depthRefresh(true);
+$("stale").hidden = !(SERVER_BUILD !== DISK_BUILD && /^[0-9]+$/.test(SERVER_BUILD));
+if (location.hash === "#monitor") showTab("monitor");
+</script>
+</body>
+</html>

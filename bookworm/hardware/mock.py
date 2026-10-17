@@ -28,6 +28,28 @@ class MockRobot(Robot):
     def gripper(self, action):
         self._record("gripper", action)
 
+    def joint_positions(self):
+        return list(getattr(self, "_joints", [0.0] * 6))
+
+    def move_joints(self, degrees):
+        self._record("move_joints", [round(float(v), 2) for v in degrees])
+        self._joints = [float(v) for v in degrees]
+        if hasattr(self, "_home_pose_for_joints"):          # tests: joint moves land on a known pose
+            self._pose = dict(self._home_pose_for_joints)
+
+    def set_speed(self, deg_per_s):
+        self._record("speed", deg_per_s)
+
+    def gripper_position(self, value):
+        self._record("gripper_position", value)
+        self._grip = float(value)
+
+    def gripper_get(self):
+        return getattr(self, "_grip", 850.0)
+
+    def stop(self):
+        self._record("stop")
+
     def capture(self):
         if self.camera is None:
             return np.full((1100, 1600, 3), 255, np.uint8)

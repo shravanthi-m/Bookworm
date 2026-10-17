@@ -1,0 +1,57 @@
+{
+  "_note": "Hand-annotated by eye (Claude), pixel coords at 1280x720, expect ~10-15 px error. free_edge = outer edge of the page to be grasped; grasp_point = suggested pinch point on it; occluded = what hides part of it.",
+  "temp/armfarm22_color.jpg": {
+    "view": "book fully visible, open, lying across the frame",
+    "book_box": [415, 150, 1022, 720],
+    "page_corners": [[478, 153], [1008, 212], [1015, 500], [440, 470]],
+    "free_edge": [[478, 153], [1008, 212]],
+    "grasp_point": [880, 198],
+    "leaves_lifted": 0,
+    "occluded": "clamp stand over the middle of the free edge"
+  },
+  "temp/burst/frame_1.jpg": {
+    "view": "book corner bottom right, hand starting to lift the page",
+    "book_box": [800, 440, 1280, 720],
+    "page_corners": [[805, 537]],
+    "free_edge": [[805, 537], [1190, 450]],
+    "grasp_point": [960, 497],
+    "leaves_lifted": 0,
+    "occluded": "thumb and fingers over the right part of the edge"
+  },
+  "temp/burst/frame_2.jpg": {
+    "view": "hand holding the page edge, leaf slightly lifted",
+    "book_box": [800, 440, 1280, 720],
+    "page_corners": [[805, 537]],
+    "free_edge": [[805, 537], [1170, 455]],
+    "grasp_point": [950, 498],
+    "leaves_lifted": 1,
+    "occluded": "hand over the right end"
+  },
+  "temp/burst/frame_3.jpg": {
+    "view": "page curling up under the thumb",
+    "book_box": [800, 450, 1280, 720],
+    "page_corners": [[803, 540]],
+    "free_edge": [[803, 540], [1050, 475]],
+    "grasp_point": [930, 507],
+    "leaves_lifted": 1,
+    "occluded": "thumb and fingers"
+  },
+  "temp/burst/frame_4.jpg": {
+    "view": "page lifted and bent over by the hand",
+    "book_box": [800, 450, 1280, 720],
+    "page_corners": [[803, 545]],
+    "free_edge": [[803, 545], [1060, 480]],
+    "grasp_point": [930, 512],
+    "leaves_lifted": 1,
+    "occluded": "thumb and fingers"
+  },
+  "temp/burst1/frame_030.jpg": {
+    "view": "static: book corner at bottom right, no hand; arm not at a scan pose",
+    "book_box": [805, 415, 1280, 720],
+    "page_corners": [[808, 592]],
+    "free_edge": [[808, 592], [1280, 425]],
+    "grasp_point": [1040, 508],
+    "leaves_lifted": 0,
+    "occluded": "none"
+  }
+}
