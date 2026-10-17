@@ -49,8 +49,11 @@ modes:
     px_per_mm: 6            # warp resolution, enough for OCR
     read_order: [left, right]
     frames: 1               # frames OCR'd for Read/Summarise (1 = fastest; scan uses ocr.frames + voting)
-    max_words_per_page: 30  # demo-friendly: read a few sentences per page (null = whole page)
-    min_sentence_quality: 0.95  # only read sentences whose words are ~all real words (skips OCR noise)
+    style: clean            # clean: only near-perfect sentences (chosen 2026-10-17); from_top: from the top, in order
+                            # clean: only near-perfect sentences (for poor OCR; skips around the page)
+    max_words: 60           # from_top: words per Read / per "continue" (finishes the sentence)
+    max_words_per_page: 30  # clean: a few sentences per page
+    min_sentence_quality: 0.95  # clean: only read sentences whose words are ~all real words
   scan:
     shots: [{pose: scan_left, region: left}, {pose: scan_right, region: right}]
     px_per_mm: 12           # ~300 dpi archival scan
@@ -99,9 +102,15 @@ verify:
   max_flip_retries: 2
 
 speech:
-  engine: system            # system (macOS `say` / Linux espeak-ng, spoken in background) | print
-  rate: 170                 # words per minute
-  voice: null               # e.g. "Samantha" on macOS (`say -v '?'` lists voices)
+  # auto = ElevenLabs when ELEVENLABS_API_KEY is in .env, else the system voice.
+  # system = macOS `say` / Linux espeak-ng. print = no audio. Too slow? set engine: system.
+  engine: auto
+  rate: 170                 # system voice: words per minute
+  voice: null               # system voice, e.g. "Samantha" (`say -v '?'` lists voices)
+  elevenlabs:
+    voice_id: Hd8mWkf5kvyBZB0S7yXU   # any voice id from elevenlabs.io (Voices -> "..." -> Copy voice ID)
+    model: eleven_flash_v2_5         # their lowest-latency model
+    timeout_s: 4                     # wait this long for a clip, then use the system voice
 
 flip:
   use_vision_corner: true   # refine the page corner from the image before each flip
@@ -140,6 +149,8 @@ ui:
   # Command the Flip button runs when flip_path is null, e.g. a teammate's script:
   # "python scripts/flip.py --once". null = python -m bookworm flip (with the same --config).
   flip_command: null
+  verify_flip: false        # ON HOLD (2026-10-17): true = after each flip, check with the camera that the page turned
+  flip_retries: 2           # if it didn't: "Oops, let me try again" up to this many more times
 
 run:
   blank_spreads_to_stop: 2  # consecutive blank spreads => end of book

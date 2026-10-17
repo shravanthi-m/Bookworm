@@ -78,6 +78,41 @@ def _is_header(sentence: str) -> bool:
     return bool(letters) and sum(c.isupper() for c in letters) / len(letters) > 0.6
 
 
+def _caps_word(w: str) -> bool:
+    letters = [c for c in w if c.isalpha()]
+    return len(letters) >= 2 and all(c.isupper() for c in letters)
+
+
+def strip_running_head(text: str) -> str:
+    """Drop a page's running head ('200 : JOSTEIN GAARDER', "SOPHIE'S WORLD : 201"): leading
+    page numbers, separators and ALL-CAPS words, up to the first ordinary word."""
+    words = text.split()
+    i = 0
+    while i < len(words):
+        letters = [c for c in words[i] if c.isalpha()]
+        if not letters:                               # '200', ':', '|', '•'
+            i += 1
+        elif all(c.isupper() for c in letters) and (
+                len(letters) >= 2 or (i + 1 < len(words) and _caps_word(words[i + 1]))):
+            i += 1                                    # GAARDER, SOPHIE'S, the "A" of "A BOOK"
+        else:
+            break
+    return " ".join(words[i:])
+
+
+def from_top(texts: list[str], max_words: int = 60, overrun: int = 30) -> tuple[str, str]:
+    """Read in order from the top of the first page: about ``max_words`` words, finishing the
+    sentence in progress (at most ``overrun`` extra words). Returns (this chunk, the rest)."""
+    text = " ".join(strip_running_head(t) for t in texts if t.strip())
+    words = re.sub(r"[•«»|■□▪●◆~_]", " ", text).split()        # OCR specks the voice would trip on
+    if len(words) <= max_words:
+        return " ".join(words), ""
+    end = max_words
+    while end < min(len(words), max_words + overrun) and not re.search(r"[.!?][’'\"”]?$", words[end - 1]):
+        end += 1
+    return " ".join(words[:end]), " ".join(words[end:])
+
+
 def excerpt(text: str, max_words: int | None, min_quality: float = 0.95, max_sentence_words: int = 35) -> str:
     """Clean whole sentences, in reading order, up to ``max_words`` (None = no limit).
 

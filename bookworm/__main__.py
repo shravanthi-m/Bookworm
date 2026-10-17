@@ -24,6 +24,7 @@ Development
     vision --webcam N      same, on a local camera (e.g. iPhone Continuity Camera), no Viam needed
     vision --video FILE    same, on a recorded video (one frame every --every seconds)
     watch-flip             fold detector: --record good|bad flips, then watch live (never moves the arm)
+    say [TEXT]             speak with the configured voice (ElevenLabs or Mac) and time it
     vlm-check lift|holder  ask a vision model (OpenRouter) if the flip is going right (never moves the arm)
     ocr IMAGE              vision pipeline on one photo; debug images in runs/debug/
     flip [--times N]       run the flip motion only (tuning)
@@ -392,6 +393,39 @@ def cmd_vlm_check(cfg, args):
     run(cfg, args)
 
 
+def cmd_say(cfg, args):
+    import time
+
+    from .speech import make_speaker
+
+    if args.list_voices:
+        from .speech.elevenlabs import api_key, list_voices
+
+        import urllib.error
+
+        try:
+            voices = list_voices(api_key())
+        except urllib.error.HTTPError as e:
+            print(f"ElevenLabs said {e.code}: this API key may not be allowed to list voices (key settings ->"
+                  " enable 'Voices: read'). Or pick one at elevenlabs.io -> Voices -> '...' -> Copy voice ID.")
+            return
+        for name, vid, desc in voices:
+            print(f"  {name:28s} {vid}   {desc}")
+        print("Use one: set speech.elevenlabs.voice_id in config/default.yaml, or try it with --voice ID")
+        return
+    if args.engine:
+        cfg["speech"]["engine"] = args.engine
+    if args.voice:
+        cfg["speech"].setdefault("elevenlabs", {})["voice_id"] = args.voice
+    sp = make_speaker(cfg["speech"])
+    t0 = time.perf_counter()
+    sp.say(args.text)
+    while getattr(sp, "_q", None) is not None and sp._q.unfinished_tasks and not getattr(sp._say, "proc", None):
+        time.sleep(0.01)                       # until the first sentence starts playing
+    print(f"[say] first audio after {time.perf_counter() - t0:.2f}s")
+    sp.wait()
+
+
 def cmd_pdf(cfg, args):
     from .archive import build_pdf
 
@@ -585,6 +619,11 @@ def main(argv=None):
     vc_src.add_argument("--live", action="store_true", help="a Viam camera (default robot.camera)")
     vc.add_argument("--camera", help="Viam camera name for --live, e.g. the side camera")
     vc.add_argument("--every", type=float, help="camera sources: keep checking every N seconds")
+    sy = sub.add_parser("say", help="speak a sentence with the configured voice and time it")
+    sy.add_argument("text", nargs="?", default="Once upon a time, a little worm found a book. She read it all night long.")
+    sy.add_argument("--engine", choices=["auto", "elevenlabs", "system"])
+    sy.add_argument("--voice", help="ElevenLabs voice id to try")
+    sy.add_argument("--list-voices", action="store_true", help="list the voices on your ElevenLabs account")
     pdf = sub.add_parser("pdf", help="(re)build a searchable PDF from a scan folder")
     pdf.add_argument("scan_dir")
     pdf.add_argument("--out", help="output file (default <scan_dir>/book.pdf)")
@@ -615,7 +654,7 @@ def main(argv=None):
     handlers = {"read": cmd_read, "scan": cmd_scan, "check": cmd_check, "pencil": cmd_pencil,
                 "save-pose": cmd_save_pose, "calibrate-book": cmd_calibrate_book,
                 "calibrate-tool-mask": cmd_calibrate_tool_mask, "calibrate-view": cmd_calibrate_view,
-                "webcams": cmd_webcams, "watch-flip": cmd_watch_flip, "vlm-check": cmd_vlm_check, "pdf": cmd_pdf, "ui": cmd_ui, "capture-set": cmd_capture_set, "ocr-eval": cmd_ocr_eval,
+                "webcams": cmd_webcams, "watch-flip": cmd_watch_flip, "vlm-check": cmd_vlm_check, "say": cmd_say, "pdf": cmd_pdf, "ui": cmd_ui, "capture-set": cmd_capture_set, "ocr-eval": cmd_ocr_eval,
                 "overlay": cmd_overlay, "vision": cmd_vision, "ocr": cmd_ocr, "flip": cmd_flip}
     handlers[args.cmd](cfg, args)
 

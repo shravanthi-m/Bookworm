@@ -85,7 +85,7 @@ def test_control_page_flips_over_its_own_connection():
 
     arm = FakeArm()
     ctrl = Controller.__new__(Controller)            # skip camera/OCR/speech setup
-    ctrl.cfg = {"robot": {"arm": "arm"}, "ui": {"flip_path": "v2"}}
+    ctrl.cfg = {"robot": {"arm": "arm"}, "ui": {"flip_path": "v2", "verify_flip": False}}   # as in default.yaml
     ctrl.camera = SimpleNamespace(conn=FakeConn(arm))
     ctrl.state = {"flip_step": None, "flipping": False, "status": "Ready"}
     ctrl._stop = threading.Event()

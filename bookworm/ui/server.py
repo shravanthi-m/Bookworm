@@ -21,10 +21,10 @@ from pathlib import Path
 import cv2
 
 from ..llm import LlmError, make_llm, summarize
-from ..modes import Scanner, excerpt
+from ..modes import Scanner, excerpt, from_top
 from ..session import RunSummary, Spread, best_of_frames
 from ..speech import make_speaker
-from ..vision import make_ocr, ocr_image, process_shot
+from ..vision import FlipOutcome, judge_flip, make_ocr, ocr_image, page_signature, process_shot
 from ..vision.page_detect import find_book_quad
 from ..vision.preprocess import rotate_frame
 
@@ -33,7 +33,8 @@ ACTIONS = {"flip": ["flip"], "read": ["read"], "scan": ["scan"],
            "flip_read": ["flip", "read"], "flip_scan": ["flip", "scan"],
            "look": ["look"], "next": ["flip", "look"],   # look = refresh the on-screen pages, no OCR
            "summarize": ["summarize"], "flip_summarize": ["flip", "summarize"],
-           "park": ["park"], "ready": ["ready"], "resume": ["resume"]}
+           "park": ["park"], "ready": ["ready"], "resume": ["resume"],
+           "where": ["where"]}                     # where = report the arm's position, never moves
 ACKS = {"flip": "Turning the page.", "next": "Turning the page.", "read": "Okay, reading.",
         "scan": "Scanning.", "summarize": "Let me summarise.", "flip_read": "Turning the page, then reading.",
         "flip_scan": "Turning the page, then scanning.", "flip_summarize": "Turning the page, then summarising.",
@@ -77,6 +78,12 @@ class Controller:
         self.cfg, self.camera = cfg, camera
         self.ocr = make_ocr(cfg["ocr"])
         self.speaker = make_speaker(cfg["speech"])
+        say = getattr(self.speaker, "_say", None)
+        if hasattr(say, "warm"):               # ElevenLabs: fetch the fixed replies now, play instantly later
+            say.warm(list(ACKS.values()) + ["Hang on, I'm still busy.", "Sorry, I didn't catch that.",
+                                            "Oops, the page didn't turn. Let me try again.",
+                                            "I couldn't turn the page. Could you give me a hand?",
+                                            "Oops, I think I turned more than one page."])
         self.llm = make_llm(cfg.get("llm"))
         self.scanner = Scanner(scan_dir, cfg)
         default = [sys.executable, "-m", "bookworm"] + (["--config", config_path] if config_path else []) + ["flip"]
@@ -92,6 +99,7 @@ class Controller:
                       "flip_s": float(cfg.get("ui", {}).get("flip_seconds", 31)), "flip_step": None}
         self.page_jpg = {"left": b"", "right": b""}
         self._proc = None
+        self._rest = ""                        # words of the spread not read yet ("continue" reads on)
         self._stop = threading.Event()
         threading.Thread(target=self._feed_loop, daemon=True).start()
 
@@ -235,6 +243,9 @@ class Controller:
         self._arm = conn.component(Arm, self.cfg["robot"].get("arm", "arm"))
         code, msg = goto(conn, self._arm, target)
         print(f"[arm] {msg}", flush=True)
+        if target == "where":
+            self.state["status"] = f"Arm {msg}"
+            return
         if self._stop.is_set():
             return
         if code != 0:
@@ -242,7 +253,20 @@ class Controller:
         self.state["status"] = done
 
     def _resume(self):
-        self.state["status"] = "Continuing" if self.speaker.resume() else "Nothing to continue"
+        """Pick up an interrupted sentence; after a finished Read, read the next chunk of the spread."""
+        if self.speaker.resume():
+            self.state["status"] = "Continuing"
+        elif self._rest:
+            text, self._rest = from_top([self._rest], self.cfg["modes"]["read"].get("max_words", 60))
+            self.state["text"] = text
+            self.speaker.say(text)
+            self.state["status"] = "Reading on" + ("" if self._rest else " (end of the spread)")
+        else:
+            self.state["status"] = "Nothing to continue"
+
+    def _where(self):
+        self._goto("where", "Checking the arm…", "")
+        print(f"[arm] where: {self.state['status']}", flush=True)
 
     def _park(self):
         self._goto("park", "Moving away…", "Parked")
@@ -264,7 +288,6 @@ class Controller:
 
         pts, path, between = flip_path.load(version)
         tag = flip_path.step_tag(version)
-
         t0 = time.time()
 
         def on_step(name):
@@ -285,9 +308,22 @@ class Controller:
         if code != 0 and not self._stop.is_set():
             raise RuntimeError(f"flip: {msg}")
 
-    def _flip(self):
+    def _snapshot(self) -> dict:
+        """What the spread looks like now: page fingerprints (fast) + left page number (OCR, ~1 s)."""
+        time.sleep(0.4)                        # let the feed catch up
+        with self.lock:
+            frame = None if self.frame is None else self.frame.copy()
+        if frame is None:
+            raise RuntimeError("no camera frame yet")
+        pages = process_shot(frame, "spread", dict(self.cfg["vision"], rotate=0))
+        frac = self.cfg["vision"]["page_number_region"]
+        page_no = self.ocr.page_number(ocr_image(self.ocr, pages["left"]), frac) if "left" in pages else None
+        return {"pages": pages, "sig": {s: page_signature(p.color) for s, p in pages.items()}, "page_no": page_no}
+
+    def _flip_once(self):
+        """One page turn: Midhat's recorded path over the page's connection (ui.flip_path), else ui.flip_command."""
         self.state.update(status="Flipping…", flipping=True, flip_step=None)
-        self._flipped = True
+        self._flipped = True                   # _look: if the page number can't be read, it's the previous + 2
         t0 = time.time()
         version = self.cfg.get("ui", {}).get("flip_path")
         try:
@@ -301,15 +337,51 @@ class Controller:
             self.state["flip_s"] = round(time.time() - t0, 1)   # next animation matches the real arm
         if hasattr(self.camera, "advance"):    # photo playback stands in for a real flip
             self.camera.advance()
-        self.state["status"] = "Flipped"
+
+    def _flip(self):
+        """Flip, then check with the camera that exactly one page turned; if nothing turned,
+        say so and try again (ui.flip_retries times) before asking for help."""
+        ucfg = self.cfg.get("ui", {})
+        verify, retries = ucfg.get("verify_flip", True), int(ucfg.get("flip_retries", 2))
+        before = self._snapshot() if verify else None
+        for attempt in range(retries + 1):
+            self._flip_once()
+            if self._stop.is_set():
+                self.state["status"] = "Flip stopped"
+                return
+            if not verify:
+                self.state["status"] = "Flipped"
+                return
+            after = self._snapshot()
+            outcome, why = judge_flip(before, after)
+            print(f"[flip] attempt {attempt + 1}: {outcome.value} - {why}", flush=True)
+            if outcome != FlipOutcome.NO_FLIP:
+                break
+            if attempt < retries:
+                self.speaker.say("Oops, the page didn't turn. Let me try again.", resumable=False)
+                self.state["status"] = f"Page didn't turn, trying again ({attempt + 2}/{retries + 1})"
+                continue
+            self.speaker.say("I couldn't turn the page. Could you give me a hand?", resumable=False)
+            raise RuntimeError(f"the page didn't turn after {retries + 1} tries")
+        self._show(after["pages"], after["page_no"])
+        if outcome == FlipOutcome.MULTI_FLIP:
+            self.speaker.say("Oops, I think I turned more than one page.", resumable=False)
+            self.state["status"] = f"Turned more than one page ({why})"
+        elif outcome == FlipOutcome.BACKWARD:
+            self.state["status"] = f"Flipped, but {why}"
+        else:
+            self.state["status"] = "Flipped" + (f" to page {after['page_no']}" if after["page_no"] else "")
 
     def _read(self):
         self.state["status"] = "Reading…"
         spread = self._spread(self.cfg["modes"]["read"].get("frames", 1))   # 1 frame: fast
         r = self.cfg["modes"]["read"]
-        parts = [excerpt(spread.results[s].text, r.get("max_words_per_page"),
-                         r.get("min_sentence_quality", 0.95)) for s in r["read_order"]]
-        text = " ".join(p for p in parts if p)
+        if r.get("style", "from_top") == "from_top":     # top of the left page, in order
+            text, self._rest = from_top([spread.results[s].text for s in r["read_order"]], r.get("max_words", 60))
+        else:                                             # "clean": only near-perfect sentences
+            parts = [excerpt(spread.results[s].text, r.get("max_words_per_page"),
+                             r.get("min_sentence_quality", 0.95)) for s in r["read_order"]]
+            text, self._rest = " ".join(p for p in parts if p), ""
         if not text:        # no clean sentence: read the start of the page anyway, better than silence
             raw = " ".join(spread.results[s].text for s in r["read_order"]).split()
             text = " ".join(raw[2:2 + (r.get("max_words_per_page") or 30)])   # skip the running header
