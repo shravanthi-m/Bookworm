@@ -33,7 +33,7 @@ You can run the page on **any laptop**. It reaches the arm and cameras through V
 |---|---|---|
 | **Next page** (or → key) | turns the page, then refreshes the pages on screen | ~30 s (the flip) |
 | **Flip** | runs Midhat's recorded flip (`scripts/flip_path.py`), then parks the arm out of view. (A camera check + "Oops, let me try again" retry exists but is off: `ui.verify_flip: true` turns it on.) | ~30 s |
-| **Read** | reads aloud from the top of the left page, ~60 words, in order (say "continue" for more) | ~3 s, then speaking |
+| **Read** | reads a few cleanly recognised sentences from each page (`modes.read.style: from_top` reads from the top in order instead) | ~3 s, then speaking |
 | **Scan** | saves both pages (image + text) and rebuilds the searchable PDF | ~8 s |
 | **Summarise** | 2-sentence, child-friendly summary of the pages, spoken (needs the OpenRouter key) | ~5 s |
 | **Flip + Read / Flip + Scan / Flip + Summarise** | the flip, then that action | flip + action |
@@ -55,7 +55,7 @@ Buttons grey out while something is running. Summarise stays grey until an OpenR
 | Say "Bookworm, …" | Does | Bookworm says |
 |---|---|---|
 | **stop** / pause / be quiet | Stop button (works even mid-sentence) | (goes quiet) |
-| **continue** / keep reading / keep going / resume / go on | after a stop: picks up mid-page where it stopped; after a Read finishes: reads the next ~60 words | (just continues) |
+| **continue** / keep reading / keep going / resume / go on | after a stop: picks up mid-page where it stopped; with `style: from_top`, after a Read finishes it reads the next ~60 words | (just continues) |
 | **flip** | Flip | "Turning the page." |
 | **next page** / turn the page | Next page | "Turning the page." |
 | **read** | Read | "Okay, reading." |

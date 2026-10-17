@@ -49,7 +49,7 @@ modes:
     px_per_mm: 6            # warp resolution, enough for OCR
     read_order: [left, right]
     frames: 1               # frames OCR'd for Read/Summarise (1 = fastest; scan uses ocr.frames + voting)
-    style: from_top         # from_top: from the top of the left page, in order; "continue" reads on
+    style: clean            # clean: only near-perfect sentences (chosen 2026-10-17); from_top: from the top, in order
                             # clean: only near-perfect sentences (for poor OCR; skips around the page)
     max_words: 60           # from_top: words per Read / per "continue" (finishes the sentence)
     max_words_per_page: 30  # clean: a few sentences per page
@@ -108,7 +108,7 @@ speech:
   rate: 170                 # system voice: words per minute
   voice: null               # system voice, e.g. "Samantha" (`say -v '?'` lists voices)
   elevenlabs:
-    voice_id: JBFqnCBsd6RMkjVDRZzb   # any voice id from elevenlabs.io (Voices -> "..." -> Copy voice ID)
+    voice_id: Hd8mWkf5kvyBZB0S7yXU   # any voice id from elevenlabs.io (Voices -> "..." -> Copy voice ID)
     model: eleven_flash_v2_5         # their lowest-latency model
     timeout_s: 4                     # wait this long for a clip, then use the system voice
 
