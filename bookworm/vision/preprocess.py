@@ -27,23 +27,68 @@ def sharpness(img: np.ndarray) -> float:
     return float(cv2.Laplacian(gray, cv2.CV_64F).var())
 
 
-def find_gutter(img: np.ndarray, search_band: float = 0.3) -> int:
-    """x-coordinate between the pages: the text-free gap nearest the middle.
+def _ink(gray: np.ndarray) -> np.ndarray:
+    return cv2.adaptiveThreshold(cv2.GaussianBlur(gray, (3, 3), 0), 1, cv2.ADAPTIVE_THRESH_MEAN_C,
+                                 cv2.THRESH_BINARY_INV, 25, 15).astype(np.float32)
 
-    "Darkest column" is unreliable: the right page's text often starts right at the fold
-    and its first letters are darker than the fold's shadow, which cut words off. Instead
-    measure ink (text marks) per column and split where there is least text; ties go to
-    the column closest to the centre.
+
+def gutter_seam(img: np.ndarray, search_band: float = 0.3, rows_per_step: int = 6) -> np.ndarray:
+    """x of the split between the pages for every row: the path down the middle that crosses
+    the least text.
+
+    A straight cut fails when the book fills the frame: the spine is slanted and slightly
+    curved, and text runs right up to it, so every vertical column clips some line ends.
+    The seam may drift one pixel sideways every ``rows_per_step`` rows (dynamic programming,
+    like seam carving), enough to follow the fold but too little to weave between text lines.
+    Text-free gaps ("least ink") are preferred over the fold's dark shadow, which cut words
+    off when the darkest column was used. Small pull towards the centre breaks ties.
     """
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
     h, w = gray.shape
     lo, hi = int(w * (0.5 - search_band / 2)), int(w * (0.5 + search_band / 2))
-    ink = cv2.adaptiveThreshold(cv2.GaussianBlur(gray, (3, 3), 0), 1, cv2.ADAPTIVE_THRESH_MEAN_C,
-                                cv2.THRESH_BINARY_INV, 25, 15)
-    profile = ink[int(h * 0.08):int(h * 0.95), lo:hi].mean(axis=0)
-    profile = np.convolve(profile, np.ones(5) / 5, mode="same")
-    candidates = np.where(profile <= profile.min() + 0.02)[0] + lo
-    return int(candidates[np.argmin(np.abs(candidates - w / 2))])
+    # Follow the fold: the darkest path that runs the full height of the page. Letters are dark
+    # too, but only for a few pixels vertically, so a heavy vertical blur leaves the fold's
+    # shadow as the darkest structure. Text-free gaps beside it stay as a tie-breaker.
+    dark = cv2.blur(255 - gray.astype(np.float32), (3, 41))[:, lo:hi]
+    ink = cv2.blur(_ink(gray), (3, 1))[:, lo:hi]
+    ink = ink * 60 - dark           # cost: darkness good, text marks a little bad
+    ink[: int(h * 0.04)] = ink[int(h * 0.97):] = 0          # ignore the page edges
+    ink -= ink.min()
+    n = h // rows_per_step
+    cost = ink[: n * rows_per_step].reshape(n, rows_per_step, -1).sum(axis=1)
+    cost += np.abs(np.arange(lo, hi) - w / 2) * (rows_per_step * 255 * 0.2 / w)
+    acc = cost.copy()
+    back = np.zeros(cost.shape, np.int8)
+    for i in range(1, n):
+        prev = acc[i - 1]
+        options = np.stack([np.r_[np.inf, prev[:-1]], prev, np.r_[prev[1:], np.inf]])
+        k = options.argmin(axis=0)
+        acc[i] += options[k, np.arange(prev.size)]
+        back[i] = k - 1
+    xs = np.empty(n, int)
+    xs[-1] = int(acc[-1].argmin())
+    for i in range(n - 1, 0, -1):
+        xs[i - 1] = xs[i] + back[i, xs[i]]
+    per_row = np.repeat(xs, rows_per_step)
+    per_row = np.r_[per_row, np.full(h - per_row.size, per_row[-1])]
+    return per_row + lo
+
+
+def find_gutter(img: np.ndarray, search_band: float = 0.3) -> int:
+    """Single x for the split (the seam's median) — for callers that need one number."""
+    return int(np.median(gutter_seam(img, search_band)))
+
+
+def split_at_seam(img: np.ndarray, seam: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Left/right page crops along a seam; the other page's pixels inside each crop are blanked
+    to the paper colour so its line ends can't leak in."""
+    x0, x1 = int(seam.min()), int(seam.max())
+    cols = np.arange(img.shape[1])[None, :]
+    paper = np.percentile(img.reshape(-1, *img.shape[2:]), 90, axis=0)
+    left, right = img[:, :x1 + 1].copy(), img[:, x0:].copy()
+    left[cols[:, :x1 + 1] >= seam[:, None]] = paper
+    right[cols[:, x0:] < seam[:, None]] = paper
+    return left, right
 
 
 def mask_rects(img: np.ndarray, rects, fill=255) -> np.ndarray:
@@ -188,7 +233,7 @@ def process_shot(frame: np.ndarray, region: str, vcfg: dict, quad_px=None, size=
         return {region: Page(img, prepare_for_ocr(clean, mode))}
 
     clean = mask_rects(clean, vcfg.get("clamp_masks"))
-    x = find_gutter(clean, band)
-    pages = {"left": Page(img[:, :x], prepare_for_ocr(clean[:, :x], mode)),
-             "right": Page(img[:, x:], prepare_for_ocr(clean[:, x:], mode))}
+    seam = gutter_seam(clean, band)
+    (li, ri), (lc, rc) = split_at_seam(img, seam), split_at_seam(clean, seam)
+    pages = {"left": Page(li, prepare_for_ocr(lc, mode)), "right": Page(ri, prepare_for_ocr(rc, mode))}
     return pages if region == "spread" else {region: pages[region]}

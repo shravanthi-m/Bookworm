@@ -48,6 +48,7 @@ modes:
     shots: [{pose: overview, region: spread}]
     px_per_mm: 6            # warp resolution, enough for OCR
     read_order: [left, right]
+    frames: 1               # frames OCR'd for Read/Summarise (1 = fastest; scan uses ocr.frames + voting)
     max_words_per_page: 30  # demo-friendly: read a few sentences per page (null = whole page)
     min_sentence_quality: 0.95  # only read sentences whose words are ~all real words (skips OCR noise)
   scan:
@@ -122,6 +123,15 @@ flip:
     - {move: {x: 0,   y: 60, z: 120, from: spine}}   # carry over the spine
     - {move: {x: -100, y: 60, z: 40, from: spine}}   # lay it on the left
     - {move: {x: -100, y: 60, z: 80, from: spine}}   # retreat up
+
+llm:
+  # OpenRouter (key: OPENROUTER_API_KEY in .env). Any vision model id from openrouter.ai/models.
+  model: google/gemini-2.5-flash
+  timeout_s: 20
+  summary_sentences: 2
+  cameras:                  # Viam camera per vlm-check (--live); --camera overrides
+    lift: webcam            # side camera at table height: sees the page edges / leaves lifting
+    holder: phone-cam       # overhead: page flat and in the holder
 
 ui:
   # Command the Flip button runs, e.g. a teammate's script: "python scripts/flip.py --once".

@@ -24,6 +24,7 @@ Development
     vision --webcam N      same, on a local camera (e.g. iPhone Continuity Camera), no Viam needed
     vision --video FILE    same, on a recorded video (one frame every --every seconds)
     watch-flip             fold detector: --record good|bad flips, then watch live (never moves the arm)
+    vlm-check lift|holder  ask a vision model (OpenRouter) if the flip is going right (never moves the arm)
     ocr IMAGE              vision pipeline on one photo; debug images in runs/debug/
     flip [--times N]       run the flip motion only (tuning)
 """
@@ -385,6 +386,12 @@ def cmd_watch_flip(cfg, args):
     watch_flip(cfg, args)
 
 
+def cmd_vlm_check(cfg, args):
+    from .vision.vlm_check import run
+
+    run(cfg, args)
+
+
 def cmd_pdf(cfg, args):
     from .archive import build_pdf
 
@@ -569,6 +576,15 @@ def main(argv=None):
     wf.add_argument("--fps", type=float, default=8.0)
     wf.add_argument("--max-deviation", type=float, help="override vision.flip_monitor.max_deviation")
     wf.add_argument("--say", action="store_true", help="also say 'stop' out loud on STOP")
+    vc = sub.add_parser("vlm-check", help="vision-model check of a flip: lift (side camera) | holder (overhead)")
+    vc.add_argument("check", choices=["lift", "holder"])
+    vc_src = vc.add_mutually_exclusive_group(required=True)
+    vc_src.add_argument("--image", help="one photo")
+    vc_src.add_argument("--images", help="every photo in a folder (e.g. runs/watch-*/frames)")
+    vc_src.add_argument("--webcam", type=int, metavar="N")
+    vc_src.add_argument("--live", action="store_true", help="a Viam camera (default robot.camera)")
+    vc.add_argument("--camera", help="Viam camera name for --live, e.g. the side camera")
+    vc.add_argument("--every", type=float, help="camera sources: keep checking every N seconds")
     pdf = sub.add_parser("pdf", help="(re)build a searchable PDF from a scan folder")
     pdf.add_argument("scan_dir")
     pdf.add_argument("--out", help="output file (default <scan_dir>/book.pdf)")
@@ -599,7 +615,7 @@ def main(argv=None):
     handlers = {"read": cmd_read, "scan": cmd_scan, "check": cmd_check, "pencil": cmd_pencil,
                 "save-pose": cmd_save_pose, "calibrate-book": cmd_calibrate_book,
                 "calibrate-tool-mask": cmd_calibrate_tool_mask, "calibrate-view": cmd_calibrate_view,
-                "webcams": cmd_webcams, "watch-flip": cmd_watch_flip, "pdf": cmd_pdf, "ui": cmd_ui, "capture-set": cmd_capture_set, "ocr-eval": cmd_ocr_eval,
+                "webcams": cmd_webcams, "watch-flip": cmd_watch_flip, "vlm-check": cmd_vlm_check, "pdf": cmd_pdf, "ui": cmd_ui, "capture-set": cmd_capture_set, "ocr-eval": cmd_ocr_eval,
                 "overlay": cmd_overlay, "vision": cmd_vision, "ocr": cmd_ocr, "flip": cmd_flip}
     handlers[args.cmd](cfg, args)
 

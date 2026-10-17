@@ -128,20 +128,24 @@ class AppleVisionOcr:
         self._ocrmac, self._Image = ocrmac, Image
         self.min_conf = min_word_conf / 100.0
         self.level = level
-        self._cache: tuple = (None, [])
+        self._cache: dict = {}              # last few images -> lines (both pages of a spread)
 
     def _lines(self, img: np.ndarray) -> list:
         """[(text, conf 0-1, (x, y, w, h) normalised, y from the bottom)], top to bottom."""
-        key = (img.__array_interface__["data"][0], img.shape)
-        if self._cache[0] == key:          # read() and page_number() on the same image: OCR once
-            return self._cache[1]
+        # read() then page_number() on the same page: OCR once. A pixel sample guards against
+        # a freed array's memory being reused for a different image of the same shape.
+        key = (img.__array_interface__["data"][0], img.shape, hash(img[::23, ::29].tobytes()))
+        if key in self._cache:
+            return self._cache[key]
         import cv2
 
         rgb = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB if img.ndim == 2 else cv2.COLOR_BGR2RGB)
         res = self._ocrmac.OCR(self._Image.fromarray(rgb), recognition_level=self.level,
                                language_preference=["en-US"]).recognize()
         lines = sorted(res, key=lambda r: (-(r[2][1] + r[2][3]), r[2][0]))
-        self._cache = (key, lines)
+        if len(self._cache) >= 6:
+            self._cache.pop(next(iter(self._cache)))
+        self._cache[key] = lines
         return lines
 
     def read(self, img: np.ndarray) -> OcrResult:
