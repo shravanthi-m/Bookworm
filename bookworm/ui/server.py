@@ -2,8 +2,10 @@
 
     python -m bookworm --config config/phone_mount.yaml ui        -> http://localhost:8000
 
-Flip runs `ui.flip_command` (default: `python -m bookworm flip`), so a teammate's own flip
-script can be plugged in without code changes. Stdlib HTTP server, no extra dependencies.
+Flip plays Midhat's recorded path over the page's own robot connection when `ui.flip_path`
+is set (v1 / v2); otherwise it runs `ui.flip_command` (default: `python -m bookworm flip`), so a
+teammate's own flip script can be plugged in without code changes. Stdlib HTTP server, no extra
+dependencies.
 """
 from __future__ import annotations
 
@@ -87,7 +89,7 @@ class Controller:
                       # book view: page images version, flip timing so the page-turn animation
                       # lasts as long as the arm (measured after each flip; ui.flip_seconds until then)
                       "spread_v": 0, "page_no": None, "flipping": False,
-                      "flip_s": float(cfg.get("ui", {}).get("flip_seconds", 31))}
+                      "flip_s": float(cfg.get("ui", {}).get("flip_seconds", 31)), "flip_step": None}
         self.page_jpg = {"left": b"", "right": b""}
         self._proc = None
         self._stop = threading.Event()
@@ -152,7 +154,21 @@ class Controller:
             frame = None if self.frame is None else self.frame.copy()
         if frame is None:
             raise RuntimeError("no camera frame yet")
-        self._show(process_shot(frame, "spread", dict(self.cfg["vision"], rotate=0)))
+        v = dict(self.cfg["vision"], rotate=0)
+        pages = process_shot(frame, "spread", v)
+        page_no = None
+        try:                                   # page number only (header/footer strip): quick
+            frac = v["page_number_region"]
+            left = self.ocr.page_number(ocr_image(self.ocr, pages["left"]), frac)
+            right = self.ocr.page_number(ocr_image(self.ocr, pages["right"]), frac) if left is None else None
+            page_no = left if left is not None else (right - 1 if right else None)
+        except Exception as e:  # noqa: BLE001 - a missing number must never block the pages
+            print(f"[look] page number not read: {e}", flush=True)
+        prev = self.state.get("page_no")
+        if page_no is None and getattr(self, "_flipped", False) and prev:
+            page_no = prev + 2                 # one leaf turned: 200/201 -> 202/203
+        self._flipped = False
+        self._show(pages, page_no)
         if self.state["status"] in ("Ready", "Flipped"):
             self.state["status"] = "Ready"
 
@@ -198,6 +214,9 @@ class Controller:
         last = ""
         for line in self._proc.stdout:
             print(line, end="", flush=True)
+            if line.startswith("STEP "):              # flip_path.py: the arm is heading to this point
+                self.state["flip_step"] = line[5:].strip()
+                continue
             last = line.strip() or last
         if self._proc.wait() != 0 and not self._stop.is_set():
             raise RuntimeError(f"{what}: {last or f'exited with {self._proc.returncode}'}")
@@ -231,11 +250,51 @@ class Controller:
     def _ready(self):
         self._goto("ready", "Coming back…", "Ready above the page")
 
-    def _flip(self):
-        self.state.update(status="Flipping…", flipping=True)
+    def _flip_path(self, version: str):
+        """Play Midhat's recorded path (flip_path.py) over the page's own Viam connection,
+        so a page turn starts right away instead of dialing the robot again (that dial is
+        flaky: it once took ~80 s of 20 s timeouts before the arm moved)."""
+        conn = getattr(self.camera, "conn", None)
+        if conn is None:
+            raise RuntimeError("not connected to the robot yet")
+        if str(GOTO_DIR) not in sys.path:
+            sys.path.insert(0, str(GOTO_DIR))
+        import flip_path
+        from viam.components.arm import Arm
+
+        pts, path, between = flip_path.load(version)
+        tag = flip_path.step_tag(version)
+
         t0 = time.time()
+
+        def on_step(name):
+            # +t = seconds since the flip started when the arm heads for this point (tunes the page animation)
+            print(f"STEP {tag}{name}  +{time.time() - t0:.2f}s", flush=True)
+            self.state["flip_step"] = f"{tag}{name}"   # the page turns the on-screen leaf in step with this
+
+        self._arm = conn.component(Arm, self.cfg["robot"].get("arm", "arm"))   # Stop calls arm.stop() on it
         try:
-            self._command(self.flip_cmd, "flip")
+            code, msg = flip_path.play(conn, self._arm, flip_path.make_plan(path, between), pts,
+                                       on_step=on_step, stopped=self._stop.is_set,
+                                       log=lambda m: print(m, flush=True))
+        except Exception:
+            if self._stop.is_set():            # Stop halted the arm mid-move; that's not an error
+                return
+            raise
+        print(f"[flip {version}] {msg}", flush=True)
+        if code != 0 and not self._stop.is_set():
+            raise RuntimeError(f"flip: {msg}")
+
+    def _flip(self):
+        self.state.update(status="Flipping…", flipping=True, flip_step=None)
+        self._flipped = True
+        t0 = time.time()
+        version = self.cfg.get("ui", {}).get("flip_path")
+        try:
+            if version:
+                self._flip_path(str(version))
+            else:
+                self._command(self.flip_cmd, "flip")
         finally:
             self.state["flipping"] = False
         if not self._stop.is_set():

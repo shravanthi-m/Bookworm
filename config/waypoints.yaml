@@ -54,4 +54,53 @@ flip_path:
 # Between pages (after a loop ends at 0, before the next starts): park out of the way and wait.
 between_pages:
   park: out_of_the_way
-  pause_s: 15
+  pause_s: 0          # no wait: the UI's Next page button sets the pace (was 15)
+
+# v2 page-flip path (2026-10-17): rubber cover on the eraser, +4 mm tip compensation, points re-taught
+# by hand and numbered 1-11. Ends 11 -> park (out_of_the_way = point 12) with no return to 1.
+# ~20 s per page. v1 above (flip_path) is untouched: revert to it if v2 misbehaves.
+flip_path_v2:
+  - name: "1"               # above start (v1 '0')
+    recorded: 2026-10-17
+    joints: [87.53, -72.34, -101.98, -51.88, -90.27, 247.48]
+    pose: {x: 99.32, y: 660.51, z: 159.17, o_x: 0.76, o_y: -0.57, o_z: -0.30, theta: -88.44}
+  - name: "2"               # approach, hand-recorded
+    recorded: 2026-10-17
+    joints: [79.31, -72.41, -97.6, -50.43, -87.12, 247.27]
+    pose: {x: 186.61, y: 614.96, z: 131.76, o_x: 0.65, o_y: -0.69, o_z: -0.32, theta: -92.50}
+  - name: "3"               # first touch, hand-recorded (v1 start + 4 mm)
+    recorded: 2026-10-17
+    joints: [87.67, -77.11, -105.44, -51.65, -88.89, 248.5]
+    pose: {x: 97.53, y: 662.65, z: 119.18, o_x: 0.76, o_y: -0.57, o_z: -0.31, theta: -88.44}
+  - name: "4"               # deep, hand-recorded further out
+    recorded: 2026-10-17
+    joints: [73.08, -77.17, -105.57, -54.94, -89.74, 248.53]
+    pose: {x: 265.36, y: 619.11, z: 122.28, o_x: 0.64, o_y: -0.72, o_z: -0.28, theta: -87.57}
+  - name: "5"               # added after 4, hand-recorded
+    recorded: 2026-10-17
+    joints: [76.8, -77.17, -105.23, -61.49, -86.78, 248.53]
+    pose: {x: 231.58, y: 641.60, z: 120.62, o_x: 0.76, o_y: -0.58, o_z: -0.27, theta: -86.02}
+  - name: "6"               # lift (v1 lift + 4 mm)
+    recorded: 2026-10-17
+    joints: [78.45, -77.32, -105.85, -51.36, -99.43, 248.54]
+    pose: {x: 200.04, y: 632.74, z: 133.43, o_x: 0.63, o_y: -0.76, o_z: -0.15, theta: -89.29}
+  - name: "7"               # release, hand-recorded (v1 3b)
+    recorded: 2026-10-17
+    joints: [74.49, -77.32, -105.5, -53.54, -97.85, 248.54]
+    pose: {x: 245.95, y: 618.15, z: 130.78, o_x: 0.61, o_y: -0.78, o_z: -0.16, theta: -88.83}
+  - name: "8"               # press down (v1 + 4 mm)
+    recorded: 2026-10-17
+    joints: [73.68, -62.03, -84.14, -35.55, -78.83, 248.56]
+    pose: {x: 213.34, y: 545.80, z: 165.57, o_x: 0.36, o_y: -0.80, o_z: -0.48, theta: -96.99}
+  - name: "9"               # push back (v1 + 4 mm)
+    recorded: 2026-10-17
+    joints: [73.67, -62.0, -88.53, -35.54, -78.74, 248.56]
+    pose: {x: 221.46, y: 573.33, z: 185.17, o_x: 0.37, o_y: -0.76, o_z: -0.53, theta: -93.59}
+  - name: "10"              # final (v1 + 4 mm)
+    recorded: 2026-10-17
+    joints: [72.29, -62.02, -84.1, -35.5, -78.84, 248.58]
+    pose: {x: 226.38, y: 540.17, z: 165.38, o_x: 0.34, o_y: -0.81, o_z: -0.48, theta: -97.02}
+  - name: "11"              # lift off above final (v1 6b), then straight to park
+    recorded: 2026-10-17
+    joints: [72.08, -57.54, -81.8, -35.45, -80.57, 247.22]
+    pose: {x: 227.74, y: 536.93, z: 203.42, o_x: 0.34, o_y: -0.81, o_z: -0.48, theta: -97.02}

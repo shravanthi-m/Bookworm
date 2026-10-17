@@ -22,5 +22,7 @@ modes:
     shots: [{pose: overview, region: spread}]
 
 ui:
-  # Flip button runs Midhat's recorded flip_path (config/waypoints.yaml) instead of the book-frame flip.
-  flip_command: ".venv/bin/python scripts/flip_path.py"
+  # Next page / Flip plays Midhat's recorded path (config/waypoints.yaml) over the page's own
+  # robot connection (no new dial per page). v2 = flip_path_v2 (2026-10-17).
+  # To revert to the original path, set v1 and restart the control page.
+  flip_path: v2

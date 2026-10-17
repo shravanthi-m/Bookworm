@@ -134,8 +134,11 @@ llm:
     holder: phone-cam       # overhead: page flat and in the holder
 
 ui:
-  # Command the Flip button runs, e.g. a teammate's script: "python scripts/flip.py --once".
-  # null = python -m bookworm flip (with the same --config).
+  # v1 | v2: the Flip button plays that recorded path (scripts/flip_path.py) over the page's
+  # own robot connection. null = run flip_command instead.
+  flip_path: null
+  # Command the Flip button runs when flip_path is null, e.g. a teammate's script:
+  # "python scripts/flip.py --once". null = python -m bookworm flip (with the same --config).
   flip_command: null
 
 run:

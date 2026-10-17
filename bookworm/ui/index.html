@@ -181,6 +181,11 @@
   .book.turning .leaf { visibility: visible; animation: turn var(--turn) cubic-bezier(.45, .05, .25, 1) forwards; }
   .book.turning .leaf .face::after { animation: shade var(--turn) ease-in-out forwards; }
   .book.turning .page.right .frame { visibility: hidden; }
+  /* arm-driven turn: the leaf moves to the angle for each point the arm reaches (set from JS) */
+  /* steady pace like the arm (it reaches full speed almost at once); the fall past vertical eases in, like gravity */
+  .book.stepping .leaf { visibility: visible; transition: transform var(--step-s, 1s) var(--step-ease, linear); }
+  .book.stepping .leaf .face::after { opacity: var(--shade, 0); transition: opacity var(--step-s, 1s) var(--step-ease, linear); }
+  .book.stepping .page.right .frame { visibility: hidden; }
   @keyframes turn {
     0% { transform: rotateY(0deg) skewY(0deg); } 12% { transform: rotateY(-8deg) skewY(-1deg); }
     50% { transform: rotateY(-90deg) skewY(-3deg); box-shadow: -30px 0 40px rgba(40,20,5,.2); }
@@ -236,8 +241,8 @@
   @media (max-width: 600px) { .orn, .lamp, .gilt, .tassel { display: none; } h1 { font-size: 24px; } .camtoggle { position: static; margin-top: 6px; } }
   @media (prefers-reduced-motion: reduce) {
     .worm, .worm i, .worm b, .halo, .candleglow { animation: none; } .hourglass { transition: none; }
-    .book.turning .leaf { animation: none; visibility: hidden; }
-    .book.turning .page.right .frame { visibility: visible; }
+    .book.turning .leaf, .book.stepping .leaf { animation: none; transition: none; visibility: hidden; }
+    .book.turning .page.right .frame, .book.stepping .page.right .frame { visibility: visible; }
   }
 </style>
 </head>
@@ -381,16 +386,53 @@
     img.src = `/page/${side}.jpg?v=${v}`;
   }
   let hourglassTurns = 0;
+  // Where the page is at each point of Midhat's flip path: [angle deg, seconds the arm takes to get there].
+  // deep/lift: the eraser catches the corner; release -> press down: the page swings over; then it settles.
+  // The swing is two segments: up to vertical at the arm's steady pace, then a quick fall to the left (FALL).
+  const FALL = (secs) => [[-90, secs - .65], [-166, .55, "cubic-bezier(.5, 0, .9, .6)"]];   // eases in like gravity
+  const STEP = { "0": [0, .8], "0.5": [0, 1.4], "start": [0, 1.7], "deep": [-4, 1.2], "lift": [-22, 1.2],
+                 "3b": [-48, .8], "press_down": FALL(2.5), "push_back": [-174, .7], "final": [-180, .7],
+                 // v2 (flip_path_v2, points 1-11, sent as "v2:N"). Seconds measured on a UI flip, 2026-10-17.
+                 "v2:1": [0, 3.06], "v2:2": [0, 1.09], "v2:3": [0, 1.10], "v2:4": [-4, 1.75], "v2:5": [-10, .91],
+                 "v2:6": [-22, 1.56], "v2:7": [-48, .63], "v2:8": FALL(2.48), "v2:9": [-174, .68], "v2:10": [-180, .68] };
+  const EARLY = .12;            // the page hears about each point up to one poll late: finish each step this much sooner
+  let lastStep = null, stepFallback = null, segTimer = null;
+  const leaf = document.querySelector(".leaf");
+  function moveLeaf(deg, secs, ease) {
+    book.style.setProperty("--step-s", Math.max(.1, secs).toFixed(2) + "s");
+    book.style.setProperty("--step-ease", ease || "linear");
+    book.style.setProperty("--shade", Math.sin(Math.abs(deg) * Math.PI / 180).toFixed(2));
+    leaf.style.transform = `rotateY(${deg}deg)`;
+  }
+  function setLeaf(step) {
+    clearTimeout(segTimer);
+    let segs = STEP[step] || [-180, .7];                         // 6b / 0 / park: already flat on the left
+    if (!Array.isArray(segs[0])) segs = [segs];
+    segs = segs.map(([d, t, e], i) => [d, i === segs.length - 1 ? t - EARLY : t, e]);
+    (function next(i) {
+      const [deg, secs, ease] = segs[i];
+      moveLeaf(deg, secs, ease);
+      if (i + 1 < segs.length) segTimer = setTimeout(() => next(i + 1), secs * 1000);
+    })(0);
+  }
   function startTurn() {
     hourglassTurns += 1;                                         // the hourglass turns over with every page
     $("hourglass").style.transform = `rotate(${hourglassTurns * 180}deg)`;
     $("leafimg").src = $("rightimg").src || "";
-    book.classList.remove("turning"); void book.offsetWidth;
-    book.classList.add("turning");
+    book.classList.remove("turning", "stepping"); leaf.style.transition = "none"; leaf.style.transform = "rotateY(0deg)";
+    void book.offsetWidth; leaf.style.transition = "";
+    book.classList.add("stepping"); lastStep = null;             // follow the arm step by step...
+    clearTimeout(stepFallback); clearTimeout(segTimer);
+    stepFallback = setTimeout(() => {                            // ...or, if the flip command reports no steps, use the timed turn
+      if (lastStep === null && flipping) { book.classList.remove("stepping"); leaf.style.transform = ""; book.classList.add("turning"); }
+    }, 9000);
     flipStart = performance.now();
     $("progress").style.visibility = "visible";
   }
   function endTurn() {
+    clearTimeout(stepFallback); clearTimeout(segTimer); lastStep = null;
+    book.classList.remove("stepping"); leaf.style.transition = "none"; leaf.style.transform = "";
+    void book.offsetWidth; leaf.style.transition = "";
     book.classList.remove("turning");
     $("progress").style.visibility = "hidden";
     $("bar").style.width = "0";
@@ -407,6 +449,9 @@
       book.style.setProperty("--turn", Math.min(flipTotal, 13) + "s");
       if (s.flipping && !flipping) startTurn();
       flipping = s.flipping;
+      if (flipping && s.flip_step && s.flip_step !== lastStep && book.classList.contains("stepping")) {
+        lastStep = s.flip_step; setLeaf(s.flip_step);
+      }
       if (s.spread_v !== spreadV) {
         spreadV = s.spread_v;
         loadPage("left", spreadV); loadPage("right", spreadV);
@@ -424,7 +469,9 @@
       if (!looked && !s.busy && s.spread_v === 0 && s.status === "Ready") { looked = true; act("look"); }
     } catch (e) { $("status").textContent = "Disconnected"; }
   }
-  setInterval(poll, 700); poll();
+  (async function loop() {                                      // check 10x/s while the arm turns a page, else ~1.4x/s
+    await poll(); setTimeout(loop, flipping ? 100 : 700);
+  })();
 
   // Voice: say "Bookworm, <command>". Uses the browser's speech recognition with the Mac's input
   // device (System Settings > Sound > Input: pick the iPhone microphone). First match wins, so
