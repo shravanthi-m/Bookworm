@@ -84,7 +84,8 @@ vision:
 
 ocr:
   engine: auto              # auto (Apple Vision on macOS, else Tesseract) | apple | tesseract
-  frames: 3                 # read N video frames per page, keep the cleanest (1 = single frame)
+  frames: 3                 # read N video frames per page (1 = single frame)
+  combine: vote             # vote = word-by-word majority across frames | best = keep the cleanest frame
   frame_gap_s: 0.3          # pause between those frames
   lang: eng
   psm: 3                    # tesseract page segmentation mode (3 = auto, 6 = single block)

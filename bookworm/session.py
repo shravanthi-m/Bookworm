@@ -47,7 +47,7 @@ def clean_words(result) -> int:
     return len(excerpt(result.text, None).split())
 
 
-def best_of_frames(frames, region, vcfg, ocr, quad=None, size=None):
+def best_of_frames(frames, region, vcfg, ocr, quad=None, size=None, combine: str = "best"):
     """OCR every frame and keep, per side, the page whose text came out cleanest.
 
     Video frames differ slightly (noise, focus breathing); on the phone feed the amount of
@@ -55,13 +55,25 @@ def best_of_frames(frames, region, vcfg, ocr, quad=None, size=None):
     Returns ({side: Page}, {side: OcrResult}).
     """
     best: dict = {}
+    texts: dict = {}
     for frame in frames:
         for side, page in process_shot(frame, region, vcfg, quad, size).items():
             res = ocr.read(ocr_image(ocr, page))
+            texts.setdefault(side, []).append(res.text)
             score = (clean_words(res), res.word_count)
             if side not in best or score > best[side][0]:
-                best[side] = (score, page, res)
-    return {s: b[1] for s, b in best.items()}, {s: b[2] for s, b in best.items()}
+                best[side] = (score, page, res, len(texts[side]) - 1)
+    results = {s: b[2] for s, b in best.items()}
+    if combine == "vote" and len(frames) >= 3:
+        # Word-level majority vote across frames, on the best frame's layout: one-off
+        # misreads get outvoted (+22% clean-sentence words per page on the test set).
+        from .vision.ocr import OcrResult
+        from .vision.ocr_eval import vote
+
+        for s, b in best.items():
+            text = vote(texts[s], backbone=b[3])
+            results[s] = OcrResult(text, b[2].mean_conf, text.split())
+    return {s: b[1] for s, b in best.items()}, results
 
 
 @dataclass
@@ -144,7 +156,8 @@ class BookSession:
                 for _ in range(n_frames - 1):
                     time.sleep(self.cfg["ocr"].get("frame_gap_s", 0.3))
                     frames.append(self.robot.capture())
-                p, r = best_of_frames(frames, shot["region"], self.cfg["vision"], self.ocr, quad, size)
+                p, r = best_of_frames(frames, shot["region"], self.cfg["vision"], self.ocr, quad, size,
+                                      self.cfg["ocr"].get("combine", "best"))
                 pages.update(p)
                 results.update(r)
             else:

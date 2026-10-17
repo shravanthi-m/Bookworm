@@ -237,3 +237,15 @@ def test_find_book_quad_tracks_a_moved_book():
         assert q is not None
         assert abs(q[:, 0].min() - x0) < 80 and abs(q[:, 0].max() - (x0 + 900)) < 80
         assert abs(q[:, 1].max() - (y0 + 700)) < 80
+
+
+def test_word_vote_fixes_one_off_misreads():
+    from bookworm.vision.ocr_eval import vote, word_accuracy
+
+    truth = "But the mind is essentially thought.\nIt was obviously an illusion."
+    frames = ["But the ming is essentially thought.\nIt was obviously an illusion.",
+              "But the mind is essentially thougbt.\nIt was obviously an illusion.",
+              "But the mind is essentially thought.\nIt was obvlously an illusion."]
+    voted = vote(frames, backbone=0)
+    assert voted == truth                                    # layout kept, each misread outvoted
+    assert word_accuracy(truth, frames[0]) < word_accuracy(truth, voted) == 1.0

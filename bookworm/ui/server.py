@@ -108,7 +108,7 @@ class Controller:
         if not frames:
             raise RuntimeError("no camera frame yet")
         v = dict(self.cfg["vision"], rotate=0)  # frames are already upright
-        pages, results = best_of_frames(frames, "spread", v, self.ocr)
+        pages, results = best_of_frames(frames, "spread", v, self.ocr, combine=self.cfg["ocr"].get("combine", "best"))
         frac = v["page_number_region"]
         left = self.ocr.page_number(ocr_image(self.ocr, pages["left"]), frac)
         right = self.ocr.page_number(ocr_image(self.ocr, pages["right"]), frac) if left is None else None

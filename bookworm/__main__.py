@@ -455,6 +455,17 @@ def cmd_capture_set(cfg, args):
         conn.close()
 
 
+def cmd_ocr_eval(cfg, args):
+    from .vision import make_ocr
+    from .vision.ocr_eval import evaluate, make_truth
+
+    root, ocr = Path(args.dir), make_ocr(cfg["ocr"])
+    if args.make_truth:
+        make_truth(root, cfg["vision"], ocr)
+    else:
+        evaluate(root, cfg["vision"], ocr)
+
+
 def cmd_ocr(cfg, args):
     from .vision import make_ocr, ocr_image, process_shot, sharpness
 
@@ -571,6 +582,9 @@ def main(argv=None):
     cs.add_argument("out", nargs="?", default="data/ocr_eval")
     cs.add_argument("--frames", type=int, default=5)
     cs.add_argument("--gap", type=float, default=0.4, help="seconds between frames")
+    oe = sub.add_parser("ocr-eval", help="score OCR methods on the test set (data/ocr_eval)")
+    oe.add_argument("dir", nargs="?", default="data/ocr_eval")
+    oe.add_argument("--make-truth", action="store_true", help="draft truth.*.txt from refs/ photos")
     o = sub.add_parser("ocr")
     o.add_argument("image")
     f = sub.add_parser("flip")
@@ -585,7 +599,7 @@ def main(argv=None):
     handlers = {"read": cmd_read, "scan": cmd_scan, "check": cmd_check, "pencil": cmd_pencil,
                 "save-pose": cmd_save_pose, "calibrate-book": cmd_calibrate_book,
                 "calibrate-tool-mask": cmd_calibrate_tool_mask, "calibrate-view": cmd_calibrate_view,
-                "webcams": cmd_webcams, "watch-flip": cmd_watch_flip, "pdf": cmd_pdf, "ui": cmd_ui, "capture-set": cmd_capture_set,
+                "webcams": cmd_webcams, "watch-flip": cmd_watch_flip, "pdf": cmd_pdf, "ui": cmd_ui, "capture-set": cmd_capture_set, "ocr-eval": cmd_ocr_eval,
                 "overlay": cmd_overlay, "vision": cmd_vision, "ocr": cmd_ocr, "flip": cmd_flip}
     handlers[args.cmd](cfg, args)
 
