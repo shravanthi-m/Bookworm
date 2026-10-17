@@ -12,7 +12,14 @@
     --ink: #3B2A20; --muted: #7A6556; --cream: #FFF8EC; --paper: #FFFDF8;
     --wall: #22372B; --wall-2: #172820;
     --wall-tone: rgba(22, 40, 31, .62);
-    --wood-tone: rgba(48, 22, 14, .66);   /* dull reddish-brown wash on the wood: 0 = raw grain, 1 = plain colour */   /* how strongly the wallpaper is toned down: 0 = full pattern, 1 = plain green */   /* green damask (burgundy tried: #561827 / #300B15) */  --wood: #7A4E2D; --wood-2: #5E3A20;
+    --wood-tone: rgba(42, 22, 16, .74);   /* was rgba(48, 22, 14, .66): a little duller and less saturated */
+    /* ONE desk surface shared by the desk top and the button bar. Every layer is pinned to the window
+       (fixed), so both pieces show the same continuous wood and shading, with no seam between them. */
+    --desk-surface:
+      linear-gradient(180deg, transparent 0 58%, rgba(30,12,4,.22) 75%, rgba(16,6,2,.62) 100%) fixed,
+      linear-gradient(var(--wood-tone), var(--wood-tone)),
+      url("/static/wood.webp") 0 0 / 520px 100vh repeat-x fixed,
+      #3A1A10;   /* dull reddish-brown wash on the wood: 0 = raw grain, 1 = plain colour */   /* how strongly the wallpaper is toned down: 0 = full pattern, 1 = plain green */   /* green damask (burgundy tried: #561827 / #300B15) */  --wood: #7A4E2D; --wood-2: #5E3A20;
     --leather: #5B3824; --leather-2: #3E2416; --edge: #D8CCB8;
     --amber: #F2B35A; --glow: rgba(255, 196, 110, .55); --ribbon: #9E2B2B; --ribbon-2: #7A1F1F;
     --danger: #B42318; --focus: #8B5CF6;
@@ -44,7 +51,7 @@
                   box-shadow: 0 4px 10px rgba(0,0,0,.45); }
 
   /* ---------- wall decor ---------- */
-  .lamp { position: absolute; top: 12px; height: clamp(104px, 17vh, 168px); aspect-ratio: 176 / 319; z-index: 1; pointer-events: none; }
+  .lamp { position: absolute; top: 12px; height: clamp(104px, 17vh, 168px); aspect-ratio: 175 / 320; z-index: 1; pointer-events: none; }
   .lamp.l { left: 2.5%; } .lamp.r { right: 2.5%; transform: scaleX(-1); }
   .lamp img { position: relative; height: 100%; display: block; filter: drop-shadow(0 6px 6px rgba(40,20,8,.35)); }
   .halo { position: absolute; left: 66%; top: 66%; width: 260%; aspect-ratio: 1; transform: translate(-50%, -50%);
@@ -56,7 +63,7 @@
   .painting { position: absolute; z-index: 0; height: auto; pointer-events: none;
               --bw: min(100cqw - 150px, (100cqh - 84px) * 258 / 196); --bh: calc(var(--bw) * 196 / 258);
               /* never wider than the wall between the sconce and the book */
-              --lampw: calc(clamp(104px, 17vh, 168px) * 176 / 319);
+              --lampw: calc(clamp(104px, 17vh, 168px) * 175 / 320);
               --avail: calc(50cqw - var(--bw) / 2 - 30px - var(--gap) - 2.5cqw - var(--lampw) - 16px);
               width: clamp(72px, min(8.6vw, var(--avail)), 150px);
               top: calc(50cqh - 15px - var(--bh) / 2 - 10px);
@@ -86,10 +93,7 @@
   .stage { position: relative; z-index: 2; min-height: 0; container-type: size; display: grid; place-items: center;
            perspective: 2400px; }
   .desk { position: absolute; left: 0; right: 0; bottom: 0; height: 34%; z-index: -1;
-          /* book-matched veneer from her table (mirrored tile), darker toward the front */
-          background: linear-gradient(180deg, rgba(40,18,6,.05), rgba(30,12,4,.35)),
-                      linear-gradient(var(--wood-tone), var(--wood-tone)),                 /* reddish-brown wash */
-                      url("/static/wood.webp") 0 0 / 520px 100% repeat-x, var(--wood-2);
+          background: var(--desk-surface);
           box-shadow: inset 0 8px 14px rgba(0,0,0,.35); }
   .prop { position: absolute; z-index: 0; height: auto; pointer-events: none; filter: drop-shadow(0 8px 8px rgba(30,12,4,.35)); }
   .stack { left: 2.5%; bottom: 7%; width: clamp(110px, 10.5vw, 165px); }
@@ -198,9 +202,7 @@
 
   /* ---------- desk controls ---------- */
   .bar { position: relative; z-index: 3;
-         background: linear-gradient(180deg, rgba(30,8,4,.55), rgba(18,5,2,.7)),
-                     linear-gradient(var(--wood-tone), var(--wood-tone)), url("/static/wood.webp") 0 0 / 520px 100% repeat-x, #3A1A10;
-         box-shadow: inset 0 10px 14px -8px rgba(0,0,0,.55);
+         background: var(--desk-surface);    /* same surface as the desk: no line where they meet */
          padding: var(--s2) var(--s4) var(--s3); display: grid; gap: 6px; justify-items: center; }
   .controls { display: flex; flex-wrap: wrap; gap: var(--s2); justify-content: center; }
   button { font: 500 13px/1 Roboto, sans-serif; color: var(--ink); background: var(--cream);
