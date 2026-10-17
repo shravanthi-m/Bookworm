@@ -10,7 +10,7 @@ robot:
   camera_calibrated: false
 
 vision:
-  rotate: 0
+  rotate: 180               # phone sees the book upside down (2026-10-17); auto_corners finds the book after rotating
   auto_corners: true        # book is found in each frame; the corners below are only a fallback
   book_corners: [[600, 40], [1450, 15], [1495, 755], [600, 765]]   # TL TR BR BL of the spread
   fallback_warp_size: [880, 740]
