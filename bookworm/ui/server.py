@@ -432,7 +432,7 @@ def serve(ctrl: Controller, port: int = 8000):
                 self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
             elif self.path == "/state":
                 state = dict(ctrl.state, speaking=bool(getattr(ctrl.speaker, "speaking", False)),
-                             llm=ctrl.llm.ready)
+                             llm=ctrl.llm.ready, voice=getattr(ctrl.speaker, "voice", None))
                 self._send(200, json.dumps(state).encode(), "application/json")
             elif self.path.startswith("/static/"):            # decor images that ship with the page
                 f = PAGE.parent / Path(self.path.split("?")[0]).name

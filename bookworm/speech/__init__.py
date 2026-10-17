@@ -32,12 +32,21 @@ class PrintSpeaker:
     def resume(self) -> bool:
         return False
 
+    @property
+    def voice(self) -> dict:
+        return {"name": "off (printed)", "fallback": False, "why": ""}
+
 
 class _SystemSay:
     """Blocking say() via a subprocess, so stop() can cut it off mid-sentence."""
 
-    def __init__(self, cmd: list[str]):
-        self.cmd, self.proc = cmd, None
+    def __init__(self, cmd: list[str], name: str = "Mac voice"):
+        self.cmd, self.proc, self.name = cmd, None, name
+        self.why = ""                               # set by make_speaker when this is a fallback (e.g. no key)
+
+    def status(self) -> dict:
+        """What the control page shows: which voice, and whether it's standing in for ElevenLabs."""
+        return {"name": self.name, "fallback": bool(self.why), "why": self.why}
 
     def __call__(self, text: str) -> None:
         self.proc = subprocess.Popen(self.cmd + [text])
@@ -51,13 +60,12 @@ class _SystemSay:
 def _system_say(rate: int = 170, voice: str | None = None, **_):
     """Blocking say() using the OS voice: macOS `say`, Linux `espeak-ng`/`espeak`."""
     if platform.system() == "Darwin":
-        base = ["say", "-r", str(rate)] + (["-v", voice] if voice else [])
+        return _SystemSay(["say", "-r", str(rate)] + (["-v", voice] if voice else []), "Mac voice")
     else:
         exe = shutil.which("espeak-ng") or shutil.which("espeak")
         if not exe:
             raise RuntimeError("no TTS found: install espeak-ng (apt install espeak-ng)")
-        base = [exe, "-s", str(rate)] + (["-v", voice] if voice else [])
-    return _SystemSay(base)
+        return _SystemSay([exe, "-s", str(rate)] + (["-v", voice] if voice else []), "system voice")
 
 
 class BackgroundSpeaker:
@@ -130,6 +138,12 @@ class BackgroundSpeaker:
     def speaking(self) -> bool:
         return self._q.unfinished_tasks > 0
 
+    @property
+    def voice(self) -> dict:
+        """{name, fallback, why} for the control page: which voice is speaking, and if it's a stand-in, why."""
+        status = getattr(self._say, "status", None)
+        return status() if status else {"name": "voice", "fallback": False, "why": ""}
+
 
 def make_speaker(scfg: dict):
     """speech.engine: auto (ElevenLabs if ELEVENLABS_API_KEY is set, else the system voice)
@@ -144,8 +158,11 @@ def make_speaker(scfg: dict):
         if key:
             print(f"[tts] voice: ElevenLabs (falls back to the system voice if slow)", flush=True)
             return BackgroundSpeaker(ElevenLabsSay(key, _system_say(**scfg), **(scfg.get("elevenlabs") or {})))
-        if engine == "elevenlabs":
-            print("[tts] ELEVENLABS_API_KEY not in .env: using the system voice", flush=True)
-    if engine in ("auto", "elevenlabs", "system"):
+        print("[tts] voice: system voice (no ELEVENLABS_API_KEY in .env)", flush=True)
+        say = _system_say(**scfg)
+        say.why = "no ElevenLabs key in .env"
+        return BackgroundSpeaker(say)
+    if engine == "system":
+        print("[tts] voice: system voice", flush=True)
         return BackgroundSpeaker(_system_say(**scfg))
     raise ValueError(f"unknown speech engine {engine!r} (auto | elevenlabs | system | print)")

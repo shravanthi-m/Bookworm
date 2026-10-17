@@ -26,3 +26,7 @@ ui:
   # robot connection (no new dial per page). v2 = flip_path_v2 (2026-10-17).
   # To revert to the original path, set v1 and restart the control page.
   flip_path: v2
+
+speech:
+  elevenlabs:
+    voice_id: 8GmsjNWRZ3Rk8VmRpvBZ   # Daniel - Warm, Confident & Compelling (Midhat's pick, 2026-10-17); default.yaml keeps Shrav's

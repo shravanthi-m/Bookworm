@@ -225,6 +225,13 @@
   .camtoggle { font-size: 12px; min-height: 32px; padding: 7px 12px; }
   .status { margin: 0; font-size: 13px; color: #F3E3CC; min-height: 1.4em; text-align: center; }
   .status b { color: #FFF6EA; font-weight: 500; }
+  /* which voice is speaking; amber dot + reason when the Mac voice is standing in for ElevenLabs */
+  .voice { margin: 0; font-size: 12px; color: #D9C7AE; text-align: center; min-height: 1.3em; }
+  .voice::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 7px; border-radius: 50%;
+                   background: #9FC29A; vertical-align: 1px; }
+  .voice.fallback { color: #F3E3CC; }
+  .voice.fallback::before { background: var(--amber); }
+  .voice:empty::before { display: none; }
   .reading { margin: 0; max-width: 900px; font-size: 13px; color: #F3E3CC; font-style: italic; text-align: center;
              white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .reading:empty { display: none; }
@@ -347,6 +354,7 @@
     </div>
     <p class="status" id="status" role="status" aria-live="polite">Ready</p>
     <p class="status" id="heard" aria-live="polite"></p>
+    <p class="voice" id="voice" title="Which voice the robot speaks with"></p>
     <div class="progress" id="progress" aria-hidden="true"><i id="bar"></i></div>
     <p class="reading" id="text"></p>
     <a id="pdf" href="/book.pdf" target="_blank" hidden>Open the scanned book (PDF)</a>
@@ -463,6 +471,10 @@
       $("rightno").textContent = s.page_no ? s.page_no + 1 : "";
       $("status").innerHTML = (s.flipping ? "<b>Turning the page…</b>" : s.status) + (s.pages ? ` · ${s.pages} pages scanned` : "");
       $("text").textContent = s.text;
+      if (s.voice) {                                             // e.g. "Voice: Mac voice · no ElevenLabs key in .env"
+        $("voice").textContent = `Voice: ${s.voice.name}` + (s.voice.fallback && s.voice.why ? ` · ${s.voice.why}` : "");
+        $("voice").classList.toggle("fallback", !!s.voice.fallback);
+      }
       $("pdf").hidden = !s.pdf;
       buttons.forEach((b) => b.disabled = s.busy || ("llm" in b.dataset && !s.llm));
       robotSpeaking = s.speaking; llmReady = s.llm;

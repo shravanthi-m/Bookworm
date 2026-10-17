@@ -47,6 +47,7 @@ class ElevenLabsSay:
         self._pool = ThreadPoolExecutor(2)
         self._pending: dict[str, Future] = {}
         self._fails, self._skip_until = 0, 0.0
+        self._last_ok, self._last_fail, self._why = 0.0, 0.0, ""   # for status(): is the Mac voice standing in?
         self.proc = None
         CACHE.mkdir(parents=True, exist_ok=True)
 
@@ -90,14 +91,23 @@ class ElevenLabsSay:
                 self._fails = 0
             except Exception as e:  # noqa: BLE001 - timeout, HTTP error, no network: never go silent
                 self._fails += 1
+                self._last_fail, self._why = time.time(), _reason(e)
                 if self._fails >= 2:
                     self._skip_until = time.time() + 60
                 print(f"[tts] elevenlabs failed ({str(e)[:120]}); using the Mac voice", flush=True)
                 return self.fallback(text)
             finally:
                 self._pending.pop(text, None)
+        self._last_ok = time.time()
         self.proc = subprocess.Popen(["afplay", str(path)])
         self.proc.wait()
+
+    def status(self) -> dict:
+        """ElevenLabs, unless its last request failed (or it's being skipped): then the Mac voice is speaking."""
+        if self._last_fail > self._last_ok or time.time() < self._skip_until:
+            fallback = getattr(self.fallback, "name", "Mac voice")
+            return {"name": fallback, "fallback": True, "why": f"ElevenLabs {self._why}"}
+        return {"name": "ElevenLabs", "fallback": False, "why": ""}
 
     def stop(self) -> None:
         for fut in self._pending.values():
@@ -112,6 +122,18 @@ class ElevenLabsSay:
         """Fetch fixed replies in the background so they play instantly from the first use."""
         for p in phrases:
             self.prefetch(p)
+
+
+def _reason(e: Exception) -> str:
+    """Short, human reason an ElevenLabs request failed (shown on the control page)."""
+    if isinstance(e, urllib.error.HTTPError):
+        return {401: "key rejected", 402: "out of credits", 404: "voice not on this account",
+                429: "rate-limited"}.get(e.code, f"error {e.code}")
+    if isinstance(e, urllib.error.URLError):
+        return "unreachable (no internet?)"
+    if isinstance(e, TimeoutError) or type(e).__name__ == "TimeoutError":
+        return "too slow"
+    return "failed"
 
 
 def list_voices(key: str) -> list[tuple[str, str, str]]:
