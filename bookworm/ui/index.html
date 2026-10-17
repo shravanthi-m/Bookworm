@@ -4,92 +4,418 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bookworm</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Roboto:wght@400;500&family=PT+Mono&display=swap" rel="stylesheet">
 <style>
-  :root { --bg: #f6f5f2; --fg: #1d1d1b; --muted: #8a8780; --line: #dcd9d2; --accent: #2f5d50; }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--fg);
-         font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; }
-  main { display: grid; grid-template-columns: 1fr 240px; gap: 24px; padding: 24px; max-width: 1400px; margin: auto; }
-  /* title + a little pink worm inching back and forth under it */
-  .brand { position: relative; display: inline-block; margin: 0 0 18px; padding-bottom: 14px; }
-  h1 { font-size: 22px; font-weight: 650; margin: 0; letter-spacing: .01em; }
-  .worm { position: absolute; left: 0; bottom: 0; display: flex; align-items: flex-end;
-          animation: crawl 9s ease-in-out infinite; }
-  .worm i { width: 9px; height: 9px; margin-right: -3px; border-radius: 50%; background: #f4a3c0;
-            animation: inch .9s ease-in-out infinite; }
-  .worm i:nth-child(2) { animation-delay: .1s; } .worm i:nth-child(3) { animation-delay: .2s; }
-  .worm i:nth-child(4) { animation-delay: .3s; }
-  .worm b { position: relative; width: 11px; height: 11px; border-radius: 50%; background: #ee7fa8;
-            animation: inch .9s ease-in-out infinite .4s; }
-  .worm b::after { content: ""; position: absolute; width: 2.5px; height: 2.5px; border-radius: 50%;
-                   background: #3a2a30; top: 3px; right: 2.5px; }
-  @keyframes inch { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
-  @keyframes crawl {
-    0%   { transform: translateX(0) scaleX(1); }
-    46%  { transform: translateX(calc(var(--w) - 46px)) scaleX(1); }
-    50%  { transform: translateX(calc(var(--w) - 46px)) scaleX(-1); }
-    96%  { transform: translateX(0) scaleX(-1); }
-    100% { transform: translateX(0) scaleX(1); }
+  /* Cozy reading room. Paper-design spacing + type sizes, warm palette. */
+  :root {
+    --ink: #3B2A20; --muted: #7A6556; --cream: #FFF8EC; --paper: #FFFDF8;
+    --wall: #22372B; --wall-2: #172820;
+    --wall-tone: rgba(22, 40, 31, .62);
+    --wood-tone: rgba(42, 22, 16, .74);   /* was rgba(48, 22, 14, .66): a little duller and less saturated */
+    /* ONE desk surface shared by the desk top and the button bar. Every layer is pinned to the window
+       (fixed), so both pieces show the same continuous wood and shading, with no seam between them. */
+    --desk-surface:
+      linear-gradient(180deg, transparent 0 58%, rgba(30,12,4,.22) 75%, rgba(16,6,2,.62) 100%) fixed,
+      linear-gradient(var(--wood-tone), var(--wood-tone)),
+      url("/static/wood.webp") 0 0 / 520px 100vh repeat-x fixed,
+      #3A1A10;   /* dull reddish-brown wash on the wood: 0 = raw grain, 1 = plain colour */   /* how strongly the wallpaper is toned down: 0 = full pattern, 1 = plain green */   /* green damask (burgundy tried: #561827 / #300B15) */  --wood: #7A4E2D; --wood-2: #5E3A20;
+    --leather: #5B3824; --leather-2: #3E2416; --edge: #D8CCB8;
+    --amber: #F2B35A; --glow: rgba(255, 196, 110, .55); --ribbon: #9E2B2B; --ribbon-2: #7A1F1F;
+    --danger: #B42318; --focus: #8B5CF6;
+    --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
+    --turn: 13s;
+    --parchment: radial-gradient(ellipse at 50% 42%, #F3E6C8 0%, #EAD8B2 55%, #D6BC8C 100%);
+    --stains: radial-gradient(circle at 18% 82%, rgba(150,100,40,.10) 0 6%, transparent 14%),
+              radial-gradient(circle at 84% 14%, rgba(150,100,40,.08) 0 4%, transparent 10%);
+    --noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .38 0 0 0 0 .26 0 0 0 0 .12 0 0 0 .10 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    --emboss: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 64 64'%3E%3Cg fill='none' stroke='%23000' stroke-opacity='.18' stroke-width='1.2'%3E%3Cpath d='M0 32 C12 20 20 44 32 32 S52 20 64 32'/%3E%3Cpath d='M16 26 c-4-6 2-10 6-6 M42 38 c4 6-2 10-6 6'/%3E%3C/g%3E%3Ccircle cx='32' cy='32' r='1.6' fill='%23D9B25F' fill-opacity='.18'/%3E%3C/svg%3E");
+    --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.55 .08' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .22 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
   }
-  @media (prefers-reduced-motion: reduce) { .worm, .worm i, .worm b { animation: none; } }
-  .feed { width: 100%; border-radius: 6px; background: #000; display: block; aspect-ratio: 16 / 9; object-fit: contain; }
-  .group { display: grid; gap: 8px; margin-bottom: 20px; }
-  button { font: inherit; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px;
-           background: #fff; color: var(--fg); cursor: pointer; text-align: left; }
-  button:hover:not(:disabled) { border-color: var(--accent); }
-  button:disabled { color: var(--muted); cursor: default; }
-  .primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .stop { color: #a33; }
-  .status { font-size: 13px; color: var(--muted); min-height: 1.4em; }
-  .text { margin-top: 16px; font-size: 14px; max-height: 140px; overflow: auto; }
-  a { color: var(--accent); font-size: 13px; }
-  @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; overflow: hidden; }
+  body { color: var(--ink); font: 15px/1.45 Roboto, -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+         background:
+           radial-gradient(ellipse at 6% 14%, rgba(255,190,105,.42), transparent 30%),
+           radial-gradient(ellipse at 94% 14%, rgba(255,190,105,.42), transparent 30%),
+           radial-gradient(ellipse at 50% 35%, transparent 40%, rgba(0,0,0,.28) 100%),   /* soft vignette */
+           linear-gradient(var(--wall-tone), var(--wall-tone)),                        /* green wash: quiets the pattern */
+           url("/static/wall_damask.webp") 0 0 / auto 100vh repeat-x,                 /* her damask, mirrored tile */
+           linear-gradient(180deg, var(--wall), var(--wall-2));
+  }
+
+  /* one screen: header / book / desk controls */
+  .room { height: 100vh; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; position: relative; }
+  .room::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 14px; z-index: 1; pointer-events: none;
+                  background: linear-gradient(180deg, #3A2414 0 3px, #D9B25F 3px 5px, #7A5428 5px 8px, #E9CB82 8px 9px, #4A2E18 9px 14px);
+                  box-shadow: 0 4px 10px rgba(0,0,0,.45); }
+
+  /* ---------- wall decor ---------- */
+  .lamp { position: absolute; top: 12px; height: clamp(104px, 17vh, 168px); aspect-ratio: 175 / 320; z-index: 1; pointer-events: none; }
+  .lamp.l { left: 2.5%; } .lamp.r { right: 2.5%; transform: scaleX(-1); }
+  .lamp img { position: relative; height: 100%; display: block; filter: drop-shadow(0 6px 6px rgba(40,20,8,.35)); }
+  .halo { position: absolute; left: 66%; top: 66%; width: 260%; aspect-ratio: 1; transform: translate(-50%, -50%);
+          border-radius: 50%; background: radial-gradient(circle, rgba(255,205,120,.6), rgba(255,190,100,.18) 40%, transparent 66%);
+          animation: flicker 3.2s ease-in-out infinite; }
+  @keyframes flicker { 0%, 100% { opacity: .95; } 30% { opacity: .74; } 55% { opacity: 1; } 70% { opacity: .82; } }
+  /* hung beside the book, positioned from the book's own size so they stay put at any window size
+     (--bw/--bh = the book's width/height, same formula as .book; 30px = cover overhang) */
+  .painting { position: absolute; z-index: 0; height: auto; pointer-events: none;
+              --bw: min(100cqw - 150px, (100cqh - 84px) * 258 / 196); --bh: calc(var(--bw) * 196 / 258);
+              /* never wider than the wall between the sconce and the book */
+              --lampw: calc(clamp(104px, 17vh, 168px) * 175 / 320);
+              --avail: calc(50cqw - var(--bw) / 2 - 30px - var(--gap) - 2.5cqw - var(--lampw) - 16px);
+              width: clamp(72px, min(8.6vw, var(--avail)), 150px);
+              top: calc(50cqh - 15px - var(--bh) / 2 - 10px);
+              filter: drop-shadow(0 8px 10px rgba(59,42,32,.4)); }
+  .painting.p1 { --gap: 2vw; right: calc(50cqw + var(--bw) / 2 + 30px + var(--gap)); transform: rotate(-1.5deg); }   /* close to the cover */
+  .painting.p2 { --gap: 4.5vw; left: calc(50cqw + var(--bw) / 2 + 30px + var(--gap)); margin-top: 22px; transform: rotate(1.2deg); }  /* further out, lower */
+  @media (max-width: 1700px) { .painting.p2 { --gap: 2vw; } }   /* less wall on smaller screens: hang it closer */
+
+  /* ---------- header ---------- */
+  header { position: relative; z-index: 2; text-align: center; padding: var(--s3) var(--s4) 0; }
+  .brand { position: relative; display: inline-block; padding-bottom: 12px; }
+  h1 { font: 700 30px/1.05 Fraunces, Georgia, serif; margin: 0; letter-spacing: .01em; color: #F1DFB8;
+       text-shadow: 0 2px 6px rgba(0,0,0,.65), 0 0 22px rgba(0,0,0,.6); }   /* stays readable over the gold swirls */
+  .sub { font-size: 13px; color: #E6D6B5; margin: 2px 0 0; text-shadow: 0 1px 3px rgba(0,0,0,.8), 0 0 14px rgba(0,0,0,.65); }
+  header { padding-top: 18px !important; }
+  .worm { position: absolute; left: 0; bottom: 0; display: flex; align-items: flex-end; animation: crawl 9s ease-in-out infinite; }
+  .worm i { width: 8px; height: 8px; margin-right: -3px; border-radius: 50%; background: #f4a3c0; animation: inch .9s ease-in-out infinite; }
+  .worm i:nth-child(2) { animation-delay: .1s; } .worm i:nth-child(3) { animation-delay: .2s; } .worm i:nth-child(4) { animation-delay: .3s; }
+  .worm b { position: relative; width: 10px; height: 10px; border-radius: 50%; background: #ee7fa8; animation: inch .9s ease-in-out infinite .4s; }
+  .worm b::after { content: ""; position: absolute; width: 2.5px; height: 2.5px; border-radius: 50%; background: #3a2a30; top: 3px; right: 2px; }
+  @keyframes inch { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+  @keyframes crawl { 0% { transform: translateX(0) scaleX(1); } 46% { transform: translateX(calc(var(--w) - 42px)) scaleX(1); }
+    50% { transform: translateX(calc(var(--w) - 42px)) scaleX(-1); } 96% { transform: translateX(0) scaleX(-1); } 100% { transform: translateX(0) scaleX(1); } }
+  .camtoggle { position: absolute; right: var(--s4); top: var(--s3); }
+
+  /* ---------- desk + book (sized to the space left on screen) ---------- */
+  .stage { position: relative; z-index: 2; min-height: 0; container-type: size; display: grid; place-items: center;
+           perspective: 2400px; }
+  .desk { position: absolute; left: 0; right: 0; bottom: 0; height: 34%; z-index: -1;
+          background: var(--desk-surface);
+          box-shadow: inset 0 8px 14px rgba(0,0,0,.35); }
+  .prop { position: absolute; z-index: 0; height: auto; pointer-events: none; filter: drop-shadow(0 8px 8px rgba(30,12,4,.35)); }
+  .stack { left: 2.5%; bottom: 7%; width: clamp(110px, 10.5vw, 165px); }
+  .scroll { left: calc(2.5% + clamp(60px, 6vw, 96px)); bottom: 2.5%; width: clamp(84px, 8vw, 126px); transform: rotate(-8deg); z-index: 1; }
+  .candles { right: 2.5%; bottom: 7%; width: clamp(110px, 10vw, 160px); }
+  .candleglow { position: absolute; right: calc(2.5% - 30px); bottom: 12%; width: clamp(180px, 17vw, 270px); aspect-ratio: 1; z-index: 0;
+                border-radius: 50%; pointer-events: none; animation: flicker 2.6s ease-in-out infinite;
+                background: radial-gradient(circle, rgba(255,200,120,.45), transparent 62%); }
+  .hourglass { right: calc(2.5% + clamp(66px, 6vw, 96px)); bottom: 4.5%; height: clamp(80px, 9vw, 130px); width: auto; z-index: 1;
+               transition: transform 1.4s cubic-bezier(.5, 0, .2, 1); }
+  /* rounded desk edge with a thin gilt inlay line, like the table's trim */
+  .desk::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 12px;
+                  background: linear-gradient(180deg, #A0683C 0 3px, #6E4123 3px 8px, #D9B25F 8px 9px, #4A2A14 9px 12px); }
+  .book { position: relative; aspect-ratio: 258 / 196; transform: rotateX(7deg); transform-style: preserve-3d;
+          width: min(100cqw - 150px, (100cqh - 84px) * 258 / 196); margin-bottom: 30px; }
+
+  /* vintage oxblood leather, blind-embossed vines, gold-foil rules */
+  .cover { position: absolute; inset: -20px -30px -28px; border-radius: 10px;
+           background:
+             radial-gradient(ellipse at 25% 15%, rgba(255,220,170,.10), transparent 55%),
+             radial-gradient(ellipse at 80% 92%, rgba(0,0,0,.35), transparent 60%),
+             var(--emboss), var(--grain), linear-gradient(160deg, #6B2A22, #3E1510 72%);
+           box-shadow: inset 0 0 0 6px #2E0E0A, inset 0 0 0 7.5px #D9B25F, inset 0 0 0 10px #2E0E0A,
+                       inset 0 0 0 11px rgba(217,178,95,.7), inset 0 0 30px rgba(0,0,0,.5),
+                       0 30px 55px -18px rgba(20, 8, 4, .7), 0 8px 16px rgba(20, 8, 4, .35); }
+  /* gold-foil filigree in the cover corners */
+  .gilt { position: absolute; z-index: 1; width: 78px; height: 78px; pointer-events: none;
+          filter: drop-shadow(0 1px 0 rgba(0,0,0,.45)); }
+  .gilt.tl { top: -17px; left: -27px; } .gilt.tr { top: -17px; right: -27px; transform: scaleX(-1); }
+  .gilt.bl { bottom: -25px; left: -27px; transform: scaleY(-1); } .gilt.br { bottom: -25px; right: -27px; transform: scale(-1); }
+  .tassel { position: absolute; z-index: 1; top: -22px; width: 12px; height: 46px; border-radius: 0 0 2px 2px;
+            clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 86%, 0 100%); pointer-events: none; }
+  .tassel.t1 { right: 22%; background: linear-gradient(180deg, #2F4A33, #43664A); }
+  .tassel.t2 { right: 24.5%; top: -18px; height: 38px; background: linear-gradient(180deg, #A9802F, #D9B25F); }
+
+  /* yellowed page block */
+  .block { position: absolute; inset: 0 -12px -12px; border-radius: 5px;
+           background: repeating-linear-gradient(0deg, #EADBB8 0 2px, #B89A6A 2px 3px); }
+  .block::before, .block::after { content: ""; position: absolute; top: 0; bottom: 0; width: 12px;
+           background: repeating-linear-gradient(90deg, #EADBB8 0 2px, #B89A6A 2px 3px); }
+  .block::before { left: 0; border-radius: 5px 0 0 5px; } .block::after { right: 0; border-radius: 0 5px 5px 0; }
+
+  /* parchment pages */
+  .spread { position: absolute; inset: 0; display: grid; grid-template-columns: 1fr 1fr; transform-style: preserve-3d; }
+  .page, .leaf .face { background: var(--noise), var(--stains), var(--parchment); }
+  .page { position: relative; overflow: hidden; box-shadow: inset 0 0 38px rgba(120, 72, 28, .38), inset 0 0 6px rgba(90, 50, 20, .35); }
+  .page.left { border-radius: 6px 2px 2px 6px; } .page.right { border-radius: 2px 6px 6px 2px; }
+  .page.left::after, .page.right::after, .leaf .face::after { content: ""; position: absolute; inset: 0; pointer-events: none; }
+  /* curvature into the gutter */
+  .page.left::after  { background: linear-gradient(90deg, transparent 72%, rgba(70,40,15,.12) 88%, rgba(50,25,8,.42)); }
+  .page.right::after { background: linear-gradient(270deg, transparent 72%, rgba(70,40,15,.12) 88%, rgba(50,25,8,.42)); }
+  .spine { position: absolute; left: 50%; top: -3px; bottom: -3px; width: 3px; margin-left: -1.5px;
+           background: rgba(45, 22, 8, .55); box-shadow: 0 0 24px 8px rgba(45, 22, 8, .2); z-index: 3; }
+
+  /* the scan, printed into the paper: ink tones, no white box, feathered edges */
+  .frame { position: absolute; inset: 7% 8% 13%; display: grid; place-items: center; }
+  /* the scan sits at its own size, centred, and its OWN edges fade into the paper (so no hard box) */
+  .frame img { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+               max-width: 100%; max-height: 100%; width: auto; height: auto; display: block;
+               mix-blend-mode: multiply; filter: grayscale(1) sepia(.3) contrast(1.25) brightness(1.1);
+               -webkit-mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent),
+                                   linear-gradient(180deg, transparent, #000 6%, #000 94%, transparent);
+               -webkit-mask-composite: source-in;
+               mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent),
+                           linear-gradient(180deg, transparent, #000 6%, #000 94%, transparent);
+               mask-composite: intersect;
+               transition: opacity .5s ease; }
+  .frame img.loading { opacity: 0; }
+  .leaf .frame img { transform: translate(-50%, -50%); } .frame img[hidden] { display: none; }
+  .empty { position: absolute; color: #7A5A3A; font: italic 15px/1.4 Fraunces, Georgia, serif; text-align: center; padding: var(--s4); }
+  .orn { position: absolute; width: 34px; height: 34px; color: #8A6A44; opacity: .8; }
+  .orn.tl { top: -8%; left: -6%; } .orn.tr { top: -8%; right: -6%; transform: scaleX(-1); }
+  .orn.bl { bottom: -6%; left: -6%; transform: scaleY(-1); } .orn.br { bottom: -6%; right: -6%; transform: scale(-1); }
+  .rule { position: absolute; left: 22%; right: 22%; bottom: 8.5%; height: 12px; color: #8A4A3A; opacity: .75; }
+  .folio { position: absolute; bottom: 3.6%; left: 0; right: 0; text-align: center; font: 600 13px/1 Fraunces, Georgia, serif; color: #6B4A2C; }
+
+  /* the turning leaf */
+  .leaf { position: absolute; top: 0; bottom: 0; left: 50%; width: 50%; transform-origin: left center;
+          transform-style: preserve-3d; z-index: 4; visibility: hidden; }
+  .leaf .face { position: absolute; inset: 0; backface-visibility: hidden; overflow: hidden;
+                box-shadow: inset 0 0 38px rgba(120, 72, 28, .38); }
+  .leaf .front { border-radius: 0 4px 4px 0; } .leaf .back { transform: rotateY(180deg); border-radius: 4px 0 0 4px; }
+  .leaf .front::after { background: linear-gradient(270deg, transparent 40%, rgba(60,35,15,.25)); opacity: 0; }
+  .leaf .back::after  { background: linear-gradient(90deg, transparent 40%, rgba(60,35,15,.25)); opacity: 0; }
+  .book.turning .leaf { visibility: visible; animation: turn var(--turn) cubic-bezier(.45, .05, .25, 1) forwards; }
+  .book.turning .leaf .face::after { animation: shade var(--turn) ease-in-out forwards; }
+  .book.turning .page.right .frame { visibility: hidden; }
+  @keyframes turn {
+    0% { transform: rotateY(0deg) skewY(0deg); } 12% { transform: rotateY(-8deg) skewY(-1deg); }
+    50% { transform: rotateY(-90deg) skewY(-3deg); box-shadow: -30px 0 40px rgba(40,20,5,.2); }
+    88% { transform: rotateY(-172deg) skewY(-1deg); } 100% { transform: rotateY(-180deg) skewY(0deg); }
+  }
+  @keyframes shade { 0%, 100% { opacity: 0; } 45%, 55% { opacity: 1; } }
+
+  /* Next page: a ribbon bookmark hanging from the book's footer */
+  .next { position: absolute; left: 50%; bottom: -20px; transform: translate(-50%, 50%); z-index: 6;
+          font: 600 15px/1 Fraunces, Georgia, serif; letter-spacing: .02em; color: #FFF6EA;
+          padding: 12px 26px 16px; min-height: 44px; border: 0; border-radius: 6px 6px 2px 2px; cursor: pointer;
+          background: linear-gradient(180deg, var(--ribbon), var(--ribbon-2));
+          clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 82%, 0 100%);
+          box-shadow: 0 6px 12px rgba(60, 20, 10, .35); transition: filter .15s, transform .05s; }
+  .next:hover:not(:disabled) { filter: brightness(1.1); }
+  .next:active:not(:disabled) { transform: translate(-50%, calc(50% + 1px)); }
+  .next:disabled { filter: grayscale(.7) brightness(.9); cursor: default; }
+  .next kbd { font: 11px "PT Mono", monospace; opacity: .75; margin-left: 6px; }
+
+  /* ---------- desk controls ---------- */
+  .bar { position: relative; z-index: 3;
+         background: var(--desk-surface);    /* same surface as the desk: no line where they meet */
+         padding: var(--s2) var(--s4) var(--s3); display: grid; gap: 6px; justify-items: center; }
+  .controls { display: flex; flex-wrap: wrap; gap: var(--s2); justify-content: center; }
+  button { font: 500 13px/1 Roboto, sans-serif; color: var(--ink); background: var(--cream);
+           border: 1px solid #C9B497; border-radius: 999px; padding: 9px 14px; min-height: 36px; cursor: pointer;
+           transition: border-color .15s, background-color .15s; }
+  button:hover:not(:disabled) { border-color: var(--leather); background: #FFF2DC; }
+  button:focus-visible, .next:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+  button:disabled { color: #A89584; background: #EFE6D8; cursor: default; }
+  .stop { color: var(--danger); border-color: #E7A69D; }
+  .camtoggle { font-size: 12px; min-height: 32px; padding: 7px 12px; }
+  .status { margin: 0; font-size: 13px; color: #F3E3CC; min-height: 1.4em; text-align: center; }
+  .status b { color: #FFF6EA; font-weight: 500; }
+  .reading { margin: 0; max-width: 900px; font-size: 13px; color: #F3E3CC; font-style: italic; text-align: center;
+             white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .reading:empty { display: none; }
+  .progress { width: min(320px, 70%); height: 3px; background: rgba(255,255,255,.15); border-radius: 2px; overflow: hidden; visibility: hidden; }
+  .progress i { display: block; height: 100%; width: 0; background: var(--amber); }
+  a { color: var(--amber); font-size: 13px; }
+
+  .cam { position: fixed; right: var(--s4); bottom: 110px; width: 240px; border-radius: 8px; overflow: hidden; z-index: 20;
+         background: #000; box-shadow: 0 12px 30px rgba(30,15,5,.4); border: 3px solid var(--leather); }
+  .cam img { width: 100%; display: block; aspect-ratio: 16 / 9; object-fit: contain; }
+
+  @media (max-width: 1100px) { .prop, .candleglow { display: none; } }
+  @media (max-width: 900px) { .painting { display: none; } }
+  @media (max-width: 600px) { .orn, .lamp, .gilt, .tassel { display: none; } h1 { font-size: 24px; } .camtoggle { position: static; margin-top: 6px; } }
+  @media (prefers-reduced-motion: reduce) {
+    .worm, .worm i, .worm b, .halo, .candleglow { animation: none; } .hourglass { transition: none; }
+    .book.turning .leaf { animation: none; visibility: hidden; }
+    .book.turning .page.right .frame { visibility: visible; }
+  }
 </style>
 </head>
 <body>
-<main>
-  <section>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="orn" viewBox="0 0 34 34">
+    <path d="M3 31 C3 18 6 9 14 5 M3 31 C9 30 14 26 16 20 C17 16 15 13 12 13 C9 13 8 16 10 18
+             M14 5 C17 3.5 21 3 25 4 M6 15 C8 13 11 12 13 13 M21 4.5 C23 7 23 9 21 10"
+          fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/>
+    <circle cx="27.5" cy="4" r="1.2" fill="currentColor"/><circle cx="3" cy="31" r="1.4" fill="currentColor"/>
+  </symbol>
+  <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#F3DC9A"/><stop offset=".45" stop-color="#B8893A"/>
+    <stop offset=".6" stop-color="#EBCB7C"/><stop offset="1" stop-color="#9A6E26"/>
+  </linearGradient>
+  <symbol id="filigree" viewBox="0 0 78 78">
+    <g fill="none" stroke="url(#gold)" stroke-width="1.6" stroke-linecap="round">
+      <path d="M6 72 C6 34 20 14 56 8"/><path d="M12 72 C14 44 26 26 52 16"/>
+      <path d="M22 40 C14 36 12 28 18 24 C24 20 30 26 26 32"/><path d="M40 20 C38 12 44 8 48 12 C52 16 46 22 42 18"/>
+      <path d="M10 56 C4 54 2 48 6 46 M60 10 C62 4 68 4 68 8"/>
+      <path d="M30 30 C38 30 44 36 44 44 M30 30 C30 38 36 44 44 44"/>
+    </g>
+    <path d="M37 37 l4 -4 l4 4 l-4 4z" fill="url(#gold)"/>
+    <circle cx="6" cy="72" r="2.4" fill="url(#gold)"/><circle cx="56" cy="8" r="2.2" fill="url(#gold)"/>
+  </symbol>
+  <symbol id="rule" viewBox="0 0 200 12">
+    <path d="M2 6 H86 M114 6 H198" stroke="currentColor" stroke-width="1"/>
+    <path d="M100 1 L106 6 L100 11 L94 6Z" fill="currentColor"/><circle cx="88" cy="6" r="1.6" fill="currentColor"/><circle cx="112" cy="6" r="1.6" fill="currentColor"/>
+  </symbol>
+</svg>
+
+<div class="room">
+  <!-- wall: sconces and gold-framed paintings -->
+  <div class="lamp l" aria-hidden="true"><span class="halo"></span><img src="/static/sconce.webp" alt=""></div>
+  <div class="lamp r" aria-hidden="true"><span class="halo"></span><img src="/static/sconce.webp" alt=""></div>
+  <header>
     <div class="brand" id="brand">
       <h1>Bookworm</h1>
       <span class="worm" aria-hidden="true"><i></i><i></i><i></i><i></i><b></b></span>
     </div>
-    <img class="feed" src="/feed" alt="Live camera">
-    <p class="text" id="text"></p>
-  </section>
-  <aside>
-    <div class="group">
-      <button class="primary" data-do="flip_read">Flip + Read</button>
-      <button class="primary" data-do="flip_scan">Flip + Scan</button>
-      <button disabled title="Coming later">Flip + Summarise</button>
+    <p class="sub">A robot that turns the pages and reads them aloud.</p>
+    <button class="camtoggle" id="camtoggle" aria-pressed="false">Show camera</button>
+  </header>
+
+  <div class="stage">
+    <div class="desk" aria-hidden="true"></div>
+    <img class="painting p1" src="/static/painting_street.webp" alt="" aria-hidden="true">
+    <img class="painting p2" src="/static/painting_flowers.webp" alt="" aria-hidden="true">
+    <img class="prop stack" src="/static/stack.webp" alt="" aria-hidden="true">
+    <img class="prop scroll" src="/static/scroll.webp" alt="" aria-hidden="true">
+    <span class="candleglow" aria-hidden="true"></span>
+    <img class="prop candles" src="/static/candles.webp" alt="" aria-hidden="true">
+    <img class="prop hourglass" id="hourglass" src="/static/hourglass.webp" alt="" aria-hidden="true">
+    <div class="book" id="book" aria-label="Current pages of the book">
+      <div class="cover" aria-hidden="true"></div>
+      <svg class="gilt tl" aria-hidden="true"><use href="#filigree"/></svg><svg class="gilt tr" aria-hidden="true"><use href="#filigree"/></svg>
+      <svg class="gilt bl" aria-hidden="true"><use href="#filigree"/></svg><svg class="gilt br" aria-hidden="true"><use href="#filigree"/></svg>
+      <span class="tassel t1" aria-hidden="true"></span><span class="tassel t2" aria-hidden="true"></span>
+      <div class="block" aria-hidden="true"></div>
+      <div class="spread">
+        <section class="page left" aria-label="Left page">
+          <div class="frame">
+            <img id="leftimg" alt="Left page, scanned" hidden>
+            <span class="empty" id="leftempty">Waiting for the camera…</span>
+            <svg class="orn tl"><use href="#orn"/></svg><svg class="orn tr"><use href="#orn"/></svg>
+            <svg class="orn bl"><use href="#orn"/></svg><svg class="orn br"><use href="#orn"/></svg>
+          </div>
+          <svg class="rule" aria-hidden="true" preserveAspectRatio="none"><use href="#rule"/></svg>
+          <div class="folio" id="leftno"></div>
+        </section>
+        <section class="page right" aria-label="Right page">
+          <div class="frame">
+            <img id="rightimg" alt="Right page, scanned" hidden>
+            <span class="empty" id="rightempty">Waiting for the camera…</span>
+            <svg class="orn tl"><use href="#orn"/></svg><svg class="orn tr"><use href="#orn"/></svg>
+            <svg class="orn bl"><use href="#orn"/></svg><svg class="orn br"><use href="#orn"/></svg>
+          </div>
+          <svg class="rule" aria-hidden="true" preserveAspectRatio="none"><use href="#rule"/></svg>
+          <div class="folio" id="rightno"></div>
+        </section>
+      </div>
+      <div class="leaf" aria-hidden="true">
+        <div class="face front"><div class="frame"><img id="leafimg" alt=""></div></div>
+        <div class="face back"></div>
+      </div>
+      <div class="spine" aria-hidden="true"></div>
+      <button class="next" data-do="next" title="Turn the page (→ key)">Next page <kbd>→</kbd></button>
     </div>
-    <div class="group">
+  </div>
+
+  <div class="bar">
+    <div class="controls" role="group" aria-label="More controls">
+      <button data-do="flip_read">Flip + Read</button>
+      <button data-do="flip_scan">Flip + Scan</button>
+      <button disabled title="Coming later">Flip + Summarise</button>
       <button data-do="flip">Flip</button>
       <button data-do="read">Read</button>
       <button data-do="scan">Scan</button>
-    </div>
-    <div class="group">
       <button class="stop" id="stop">Stop</button>
     </div>
-    <div class="status" id="status">Ready</div>
-    <a id="pdf" href="/book.pdf" target="_blank" hidden>Open scan PDF</a>
-  </aside>
-</main>
+    <p class="status" id="status" role="status" aria-live="polite">Ready</p>
+    <div class="progress" id="progress" aria-hidden="true"><i id="bar"></i></div>
+    <p class="reading" id="text"></p>
+    <a id="pdf" href="/book.pdf" target="_blank" hidden>Open the scanned book (PDF)</a>
+  </div>
+</div>
+
+<div class="cam" id="cam" hidden><img id="feed" alt="Live camera"></div>
+
 <script>
   const $ = (id) => document.getElementById(id);
-  $("brand").style.setProperty("--w", $("brand").offsetWidth + "px");   // crawl the title's width
-  const buttons = document.querySelectorAll("[data-do]");
-  buttons.forEach((b) => b.onclick = () => fetch("/do/" + b.dataset.do, { method: "POST" }).then(poll));
-  $("stop").onclick = () => fetch("/stop", { method: "POST" });
+  $("brand").style.setProperty("--w", $("brand").offsetWidth + "px");
+  const book = $("book"), buttons = document.querySelectorAll("[data-do]");
+  let spreadV = 0, flipping = false, flipStart = 0, flipTotal = 31, looked = false;
+
+  const act = (name) => fetch("/do/" + name, { method: "POST" }).then(poll);
+  buttons.forEach((b) => b.onclick = () => act(b.dataset.do));
+  $("stop").onclick = () => fetch("/stop", { method: "POST" }).then(poll);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowRight" && !e.target.closest("input, textarea")) {
+      const next = document.querySelector('[data-do="next"]');
+      if (!next.disabled) act("next");
+    }
+  });
+
+  $("camtoggle").onclick = () => {                              // live camera only streams while shown
+    const show = $("cam").hidden;
+    $("cam").hidden = !show;
+    $("feed").src = show ? "/feed" : "";
+    $("camtoggle").textContent = show ? "Hide camera" : "Show camera";
+    $("camtoggle").setAttribute("aria-pressed", String(show));
+  };
+
+  function loadPage(side, v) {
+    const img = $(side + "img");
+    img.classList.add("loading");
+    img.onload = () => { img.hidden = false; $(side + "empty").hidden = true; img.classList.remove("loading"); };
+    img.src = `/page/${side}.jpg?v=${v}`;
+  }
+  let hourglassTurns = 0;
+  function startTurn() {
+    hourglassTurns += 1;                                         // the hourglass turns over with every page
+    $("hourglass").style.transform = `rotate(${hourglassTurns * 180}deg)`;
+    $("leafimg").src = $("rightimg").src || "";
+    book.classList.remove("turning"); void book.offsetWidth;
+    book.classList.add("turning");
+    flipStart = performance.now();
+    $("progress").style.visibility = "visible";
+  }
+  function endTurn() {
+    book.classList.remove("turning");
+    $("progress").style.visibility = "hidden";
+    $("bar").style.width = "0";
+  }
+  (function tick() {
+    if (flipping) $("bar").style.width = Math.min(100, (performance.now() - flipStart) / (flipTotal * 1000) * 100) + "%";
+    requestAnimationFrame(tick);
+  })();
+
   async function poll() {
     try {
       const s = await (await fetch("/state")).json();
-      $("status").textContent = s.status + (s.pages ? ` · ${s.pages} pages scanned` : "");
+      flipTotal = s.flip_s || flipTotal;
+      book.style.setProperty("--turn", Math.min(flipTotal, 13) + "s");
+      if (s.flipping && !flipping) startTurn();
+      flipping = s.flipping;
+      if (s.spread_v !== spreadV) {
+        spreadV = s.spread_v;
+        loadPage("left", spreadV); loadPage("right", spreadV);
+        if (!flipping) endTurn();
+      } else if (!flipping && !s.busy && book.classList.contains("turning")) {
+        endTurn();
+      }
+      $("leftno").textContent = s.page_no ? s.page_no : "";
+      $("rightno").textContent = s.page_no ? s.page_no + 1 : "";
+      $("status").innerHTML = (s.flipping ? "<b>Turning the page…</b>" : s.status) + (s.pages ? ` · ${s.pages} pages scanned` : "");
       $("text").textContent = s.text;
       $("pdf").hidden = !s.pdf;
       buttons.forEach((b) => b.disabled = s.busy);
+      if (!looked && !s.busy && s.spread_v === 0 && s.status === "Ready") { looked = true; act("look"); }
     } catch (e) { $("status").textContent = "Disconnected"; }
   }
-  setInterval(poll, 1000); poll();
+  setInterval(poll, 700); poll();
 </script>
 </body>
 </html>
