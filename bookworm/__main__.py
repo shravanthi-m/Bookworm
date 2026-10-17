@@ -429,7 +429,10 @@ def cmd_capture_set(cfg, args):
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    k = len(list(out.glob("spread_*"))) + 1          # resume numbering if the folder exists
+    done = sorted(out.glob("spread_*"))
+    k = len(done) + 1                                # resume numbering if the folder exists
+    if done and len(list(done[-1].glob("frame_*.jpg"))) < args.frames:
+        k -= 1                                       # last spread was interrupted: redo it
     conn = ViamConnection()
     try:
         robot = ViamRobot(conn, **cfg["robot"])
@@ -443,6 +446,9 @@ def cmd_capture_set(cfg, args):
                 frame = rotate_frame(robot.capture(), cfg["vision"].get("rotate", 0))
                 cv2.imwrite(str(d / f"frame_{i}.jpg"), frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
                 time.sleep(args.gap)
+            for extra in d.glob("frame_*.jpg"):      # drop leftovers from an interrupted run
+                if int(extra.stem.split("_")[1]) > args.frames:
+                    extra.unlink()
             print(f"  saved {args.frames} frames -> {d}/   (now turn the page)")
             k += 1
     finally:
