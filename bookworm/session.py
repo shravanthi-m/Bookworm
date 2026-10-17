@@ -37,6 +37,43 @@ class Spread:
     pages: dict[str, Page]
     shots: list[Shot]
     page_no: int | None   # left-page number (None if not found)
+    results: dict | None = None   # OCR per side, when already done during capture (best-of-N)
+
+
+def clean_words(result) -> int:
+    """How much of a page would be read aloud: words in clean sentences."""
+    from .modes.read_aloud import excerpt
+
+    return len(excerpt(result.text, None).split())
+
+
+def best_of_frames(frames, region, vcfg, ocr, quad=None, size=None, combine: str = "best"):
+    """OCR every frame and keep, per side, the page whose text came out cleanest.
+
+    Video frames differ slightly (noise, focus breathing); on the phone feed the amount of
+    cleanly-read text varied 2-3x between consecutive frames of the same page.
+    Returns ({side: Page}, {side: OcrResult}).
+    """
+    best: dict = {}
+    texts: dict = {}
+    for frame in frames:
+        for side, page in process_shot(frame, region, vcfg, quad, size).items():
+            res = ocr.read(ocr_image(ocr, page))
+            texts.setdefault(side, []).append(res.text)
+            score = (clean_words(res), res.word_count)
+            if side not in best or score > best[side][0]:
+                best[side] = (score, page, res, len(texts[side]) - 1)
+    results = {s: b[2] for s, b in best.items()}
+    if combine == "vote" and len(frames) >= 3:
+        # Word-level majority vote across frames, on the best frame's layout: one-off
+        # misreads get outvoted (+22% clean-sentence words per page on the test set).
+        from .vision.ocr import OcrResult
+        from .vision.ocr_eval import vote
+
+        for s, b in best.items():
+            text = vote(texts[s], backbone=b[3])
+            results[s] = OcrResult(text, b[2].mean_conf, text.split())
+    return {s: b[1] for s, b in best.items()}, results
 
 
 @dataclass
@@ -100,7 +137,8 @@ class BookSession:
         return frame
 
     def capture_spread(self) -> Spread:
-        pages, shots = {}, []
+        pages, shots, results = {}, [], {}
+        n_frames = max(1, int(self.cfg["ocr"].get("frames", 1)))
         bcfg, ppm = self.cfg["book"], self.mcfg["px_per_mm"]
         for shot in self.mcfg["shots"]:
             self._goto(shot["pose"])
@@ -113,12 +151,22 @@ class BookSession:
                 quad_mm = page_quad(shot["region"], bcfg["page_width_mm"], bcfg["page_height_mm"])
                 quad = book_quad_pixels(self.book, geom, quad_mm)
                 size = ((quad_mm[1, 0] - quad_mm[0, 0]) * ppm, bcfg["page_height_mm"] * ppm)
-            pages.update(process_shot(frame, shot["region"], self.cfg["vision"], quad, size))
+            if n_frames > 1:
+                frames = [frame]
+                for _ in range(n_frames - 1):
+                    time.sleep(self.cfg["ocr"].get("frame_gap_s", 0.3))
+                    frames.append(self.robot.capture())
+                p, r = best_of_frames(frames, shot["region"], self.cfg["vision"], self.ocr, quad, size,
+                                      self.cfg["ocr"].get("combine", "best"))
+                pages.update(p)
+                results.update(r)
+            else:
+                pages.update(process_shot(frame, shot["region"], self.cfg["vision"], quad, size))
             self.times["preprocess"].append(time.perf_counter() - t0)
             shots.append(Shot(shot["region"], frame, geom))
         with self._timed("page_no"):
             page_no = self._page_number(pages)
-        return Spread(pages, shots, page_no)
+        return Spread(pages, shots, page_no, results or None)
 
     def _page_number(self, pages) -> int | None:
         frac = self.cfg["vision"]["page_number_region"]
@@ -198,8 +246,12 @@ class BookSession:
         blanks = 0
         while True:
             with self._timed("ocr"):
-                futs = {side: self.pool.submit(self.ocr.read, ocr_image(self.ocr, page)) for side, page in spread.pages.items()}
-                results = {side: f.result() for side, f in futs.items()}
+                if spread.results:                # already read while picking the best frame
+                    results = spread.results
+                else:
+                    futs = {side: self.pool.submit(self.ocr.read, ocr_image(self.ocr, page))
+                            for side, page in spread.pages.items()}
+                    results = {side: f.result() for side, f in futs.items()}
             self._save_debug(summary.spreads, spread, results)
             with self._timed("handler"):
                 self.handler.on_spread(summary.spreads, spread, results)

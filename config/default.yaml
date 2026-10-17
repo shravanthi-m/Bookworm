@@ -59,6 +59,7 @@ modes:
 vision:
   # Fallback when camera geometry is unavailable (mock / --images photos):
   # four corners of the spread in the raw image, TL, TR, BR, BL (pixels). null = full frame.
+  auto_corners: true        # find the book in every frame (survives a bumped camera); book_corners = fallback
   book_corners: null        # (in the frame AFTER `rotate`)
   rotate: 0                 # fixed camera mounted sideways? rotate frames upright: 0 | 90 | 180 | 270 (clockwise)
   fallback_warp_size: [1600, 1100]   # output size when warping to book_corners (calibrate-view sets it)
@@ -83,6 +84,9 @@ vision:
 
 ocr:
   engine: auto              # auto (Apple Vision on macOS, else Tesseract) | apple | tesseract
+  frames: 3                 # read N video frames per page (1 = single frame)
+  combine: vote             # vote = word-by-word majority across frames | best = keep the cleanest frame
+  frame_gap_s: 0.3          # pause between those frames
   lang: eng
   psm: 3                    # tesseract page segmentation mode (3 = auto, 6 = single block)
   min_word_conf: 50

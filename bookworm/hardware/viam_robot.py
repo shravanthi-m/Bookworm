@@ -28,14 +28,18 @@ class ViamConnection:
         if not (self.address and key_id and key):
             raise HardwareError("VIAM_ADDRESS / VIAM_API_KEY_ID / VIAM_API_KEY not set — copy .env.example to .env")
 
+        self._key_id, self._key = key_id, key
         self.loop = asyncio.new_event_loop()
         threading.Thread(target=self.loop.run_forever, daemon=True).start()
+        self._dial()
+
+    def _dial(self) -> None:
         # Dialing the cloud machine is flaky (some routes time out after ~20 s each), so
         # give each attempt time and retry instead of failing on the first slow dial.
         last = None
         for _ in range(3):
             try:
-                self.machine = self.call(self._connect(key_id, key), timeout=90)
+                self.machine = self.call(self._connect(self._key_id, self._key), timeout=90)
                 return
             except Exception as e:  # noqa: BLE001 - TimeoutError / connection errors from the SDK
                 last = e
@@ -70,6 +74,14 @@ class ViamConnection:
                     time.sleep(1)
         raise HardwareError(f"component '{name}' not available ({last}); machine has: {self.resource_names()}")
 
+    def reconnect(self) -> None:
+        """Drop a broken connection and dial again (long sessions over flaky Wi-Fi do break)."""
+        try:
+            self.call(self.machine.close(), timeout=10)
+        except Exception:  # noqa: BLE001 - it's already broken
+            pass
+        self._dial()
+
     def close(self) -> None:
         try:
             self.call(self.machine.close())
@@ -80,15 +92,24 @@ class ViamConnection:
 class ViamRobot(Robot):
     def __init__(self, conn: ViamConnection, arm: str, gripper: str, camera: str,
                  camera_calibrated: bool = True, **_):
+        self.conn, self.camera_name, self.camera_calibrated = conn, camera, camera_calibrated
+        self._names = (arm, gripper, camera)
+        self._lookup()
+        self._intrinsics = None
+
+    def _lookup(self) -> None:
         from viam.components.arm import Arm
         from viam.components.camera import Camera
         from viam.components.gripper import Gripper
 
-        self.conn, self.camera_name, self.camera_calibrated = conn, camera, camera_calibrated
-        self.arm = conn.component(Arm, arm)
-        self.grip = conn.component(Gripper, gripper)
-        self.cam = conn.component(Camera, camera)
-        self._intrinsics = None
+        arm, gripper, camera = self._names
+        self.arm = self.conn.component(Arm, arm)
+        self.grip = self.conn.component(Gripper, gripper)
+        self.cam = self.conn.component(Camera, camera)
+
+    def reconnect(self) -> None:
+        self.conn.reconnect()
+        self._lookup()
 
     # ---- arm / gripper ------------------------------------------------------
     def move_to(self, pose):
@@ -110,6 +131,13 @@ class ViamRobot(Robot):
 
     # ---- camera -------------------------------------------------------------
     def capture(self):
+        try:
+            return self._capture()
+        except Exception:  # noqa: BLE001 - dropped connection: redial once, then let errors through
+            self.reconnect()
+            return self._capture()
+
+    def _capture(self):
         # RealSense returns 'color' (jpeg, ~70 KB) and 'depth' (~1.8 MB). Asking for colour only
         # cut capture from ~485 ms to ~31 ms on the rig.
         try:

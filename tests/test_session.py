@@ -53,6 +53,7 @@ def make_session(spreads, mode="read", stuck=False, handler=None, tmp_path=None)
     cfg["robot"]["backend"] = "mock"
     cfg["run"]["save_dir"] = None
     cfg["vision"]["settle_s"] = 0
+    cfg["ocr"]["frames"] = 1
     cfg["flip"]["sequence"] = [s for s in cfg["flip"]["sequence"] if "wait" not in s]
     cam = FakeCamera(spreads, stuck)
     robot = MockRobot(cam)
@@ -197,3 +198,21 @@ def test_excerpt_skips_garbled_ocr_and_headers():
     out = excerpt(ocr, 30)
     assert out == "So nature is not a dream after all. For example, only man has a mind. Are we automatons as well?"
     assert excerpt("Xq zzv brrp. Qwt plk mnnb.", 30) == ""          # nothing clean -> stay quiet
+
+
+def test_best_of_frames_keeps_cleanest_page_per_side():
+    from bookworm.session import best_of_frames
+
+    class OcrBySeed:                    # frame brightness decides how clean the "OCR" is
+        wants_color = True              # gets the raw colour page, like the Apple engine
+
+        def read(self, img):
+            clean = img.mean() > 100
+            text = "The cat sat on the mat. The dog ran far away." if clean else "Thx cxt sxt qn tvb mzt."
+            return OcrResult(text, 90.0, text.split())
+
+    dark, bright = np.full((200, 400, 3), 40, np.uint8), np.full((200, 400, 3), 200, np.uint8)
+    vcfg = {"book_corners": None, "clamp_masks": [], "clamp_color_hsv": None}
+    pages, results = best_of_frames([dark, bright, dark], "spread", vcfg, OcrBySeed())
+    assert set(results) == {"left", "right"} and all("cat sat" in r.text for r in results.values())
+    assert pages["left"].color.mean() > 100

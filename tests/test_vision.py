@@ -222,3 +222,30 @@ def test_apple_vision_ocr_reads_page_and_number():
     assert img.ndim == 3                                       # Apple engine gets the colour page
     assert "hello world" in ocr.read(img).text.lower()
     assert ocr.page_number(img, 0.08) == 12
+
+
+def test_find_book_quad_tracks_a_moved_book():
+    from bookworm.vision.page_detect import find_book_quad
+
+    table = np.full((1080, 1920, 3), 250, np.uint8)                      # whiter than the pages
+    book = make_spread(w=900, h=700)
+    book[:, :, 2] = np.minimum(book[:, :, 2], 235)                       # cream paper
+    for (x0, y0) in ((500, 100), (700, 300)):                           # camera "bumped"
+        frame = table.copy()
+        frame[y0:y0 + 700, x0:x0 + 900] = book
+        q = find_book_quad(frame)
+        assert q is not None
+        assert abs(q[:, 0].min() - x0) < 80 and abs(q[:, 0].max() - (x0 + 900)) < 80
+        assert abs(q[:, 1].max() - (y0 + 700)) < 80
+
+
+def test_word_vote_fixes_one_off_misreads():
+    from bookworm.vision.ocr_eval import vote, word_accuracy
+
+    truth = "But the mind is essentially thought.\nIt was obviously an illusion."
+    frames = ["But the ming is essentially thought.\nIt was obviously an illusion.",
+              "But the mind is essentially thougbt.\nIt was obviously an illusion.",
+              "But the mind is essentially thought.\nIt was obvlously an illusion."]
+    voted = vote(frames, backbone=0)
+    assert voted == truth                                    # layout kept, each misread outvoted
+    assert word_accuracy(truth, frames[0]) < word_accuracy(truth, voted) == 1.0

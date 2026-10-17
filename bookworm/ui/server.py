@@ -19,9 +19,10 @@ from pathlib import Path
 import cv2
 
 from ..modes import Scanner, excerpt
-from ..session import RunSummary, Spread
+from ..session import RunSummary, Spread, best_of_frames
 from ..speech import make_speaker
 from ..vision import make_ocr, ocr_image, process_shot
+from ..vision.page_detect import find_book_quad
 from ..vision.preprocess import rotate_frame
 
 PAGE = Path(__file__).with_name("index.html")
@@ -79,8 +80,13 @@ class Controller:
         while True:
             try:
                 f = rotate_frame(self.camera.capture(), self.cfg["vision"].get("rotate", 0))
-                ok, buf = cv2.imencode(".jpg", cv2.resize(f, (960, int(960 * f.shape[0] / f.shape[1]))),
-                                       [cv2.IMWRITE_JPEG_QUALITY, 75])
+                view = f.copy()                                # full resolution: crisp on Retina screens
+                if self.cfg["vision"].get("auto_corners"):
+                    scale = 960 / f.shape[1]                   # detect on a small copy (fast)
+                    quad = find_book_quad(cv2.resize(f, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA))
+                    if quad is not None:
+                        cv2.polylines(view, [(quad / scale).astype("int32")], True, (80, 140, 110), 3)
+                ok, buf = cv2.imencode(".jpg", view, [cv2.IMWRITE_JPEG_QUALITY, 90])
                 with self.lock:
                     self.frame, self.jpeg = f, buf.tobytes() if ok else self.jpeg
                 if self.state["status"].startswith(("Camera:", "Connecting")):
@@ -89,20 +95,24 @@ class Controller:
                 msg = str(e)
                 self.state["status"] = "Connecting to camera…" if "connecting" in msg else f"Camera: {msg}"
                 time.sleep(1)
-            time.sleep(0.15)
+            time.sleep(0.05)
 
     def _spread(self) -> Spread:
         time.sleep(0.4)                        # let the feed catch up after a flip
-        with self.lock:
-            frame = None if self.frame is None else self.frame.copy()
-        if frame is None:
+        frames = []
+        for _ in range(max(1, int(self.cfg["ocr"].get("frames", 1)))):
+            with self.lock:
+                if self.frame is not None:
+                    frames.append(self.frame.copy())
+            time.sleep(self.cfg["ocr"].get("frame_gap_s", 0.3))
+        if not frames:
             raise RuntimeError("no camera frame yet")
-        v = dict(self.cfg["vision"], rotate=0)  # frame is already upright
-        pages = process_shot(frame, "spread", v)
+        v = dict(self.cfg["vision"], rotate=0)  # frames are already upright
+        pages, results = best_of_frames(frames, "spread", v, self.ocr, combine=self.cfg["ocr"].get("combine", "best"))
         frac = v["page_number_region"]
         left = self.ocr.page_number(ocr_image(self.ocr, pages["left"]), frac)
         right = self.ocr.page_number(ocr_image(self.ocr, pages["right"]), frac) if left is None else None
-        return Spread(pages, [], left if left is not None else (right - 1 if right else None))
+        return Spread(pages, [], left if left is not None else (right - 1 if right else None), results)
 
     # ---- actions ---------------------------------------------------------------
     def start(self, name: str) -> bool:
@@ -143,7 +153,7 @@ class Controller:
         self.state["status"] = "Reading…"
         spread = self._spread()
         r = self.cfg["modes"]["read"]
-        parts = [excerpt(self.ocr.read(ocr_image(self.ocr, spread.pages[s])).text, r.get("max_words_per_page"),
+        parts = [excerpt(spread.results[s].text, r.get("max_words_per_page"),
                          r.get("min_sentence_quality", 0.95)) for s in r["read_order"]]
         text = " ".join(p for p in parts if p) or "(nothing clear enough to read)"
         self.state["text"] = text
@@ -154,7 +164,7 @@ class Controller:
     def _scan(self):
         self.state["status"] = "Scanning…"
         spread = self._spread()
-        results = {s: self.ocr.read(ocr_image(self.ocr, p)) for s, p in spread.pages.items()}
+        results = spread.results
         self.scanner.on_spread(len(self.scanner.pages) // 2, spread, results)
         self.scanner.finish(RunSummary(spreads=len(self.scanner.pages) // 2, stopped_because="ui"))
         self.state.update(pages=len(self.scanner.pages), pdf=True,
@@ -190,7 +200,7 @@ def serve(ctrl: Controller, port: int = 8000):
                             jpg = ctrl.jpeg
                         if jpg:
                             self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + jpg + b"\r\n")
-                        time.sleep(0.2)
+                        time.sleep(0.1)
                 except (BrokenPipeError, ConnectionResetError):
                     pass
             else:

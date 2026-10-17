@@ -390,7 +390,7 @@ def cmd_pdf(cfg, args):
 
     build_pdf(args.scan_dir, args.out, searchable=not args.no_text, lang=cfg["ocr"]["lang"],
               psm=cfg["ocr"]["psm"], page_width_mm=cfg["book"]["page_width_mm"],
-              ocr_input=cfg["vision"].get("ocr_input", "gray"))
+              ocr_input=cfg["vision"].get("ocr_input", "gray"), engine=cfg["ocr"].get("engine", "auto"))
 
 
 def cmd_ui(cfg, args):
@@ -414,6 +414,56 @@ def cmd_ui(cfg, args):
     finally:
         if hasattr(camera, "close"):
             camera.close()
+
+
+def cmd_capture_set(cfg, args):
+    """Build an OCR test set: N live frames per spread; you turn pages by hand between spreads.
+
+    data/<set>/spread_01/frame_1.jpg ... frame_N.jpg. Add the true text later as
+    spread_01/truth.left.txt / truth.right.txt (see `ocr-eval`). Never moves the arm.
+    """
+    import time
+
+    from .hardware.viam_robot import ViamConnection, ViamRobot
+    from .vision.preprocess import rotate_frame
+
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    done = sorted(out.glob("spread_*"))
+    k = len(done) + 1                                # resume numbering if the folder exists
+    if done and len(list(done[-1].glob("frame_*.jpg"))) < args.frames:
+        k -= 1                                       # last spread was interrupted: redo it
+    conn = ViamConnection()
+    try:
+        robot = ViamRobot(conn, **cfg["robot"])
+        print(f"Saving to {out}/. Turn to a spread, press Enter to capture; type q + Enter to finish.")
+        while True:
+            if input(f"spread {k:02d} > ").strip().lower() == "q":
+                break
+            d = out / f"spread_{k:02d}"
+            d.mkdir(exist_ok=True)
+            for i in range(1, args.frames + 1):
+                frame = rotate_frame(robot.capture(), cfg["vision"].get("rotate", 0))
+                cv2.imwrite(str(d / f"frame_{i}.jpg"), frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+                time.sleep(args.gap)
+            for extra in d.glob("frame_*.jpg"):      # drop leftovers from an interrupted run
+                if int(extra.stem.split("_")[1]) > args.frames:
+                    extra.unlink()
+            print(f"  saved {args.frames} frames -> {d}/   (now turn the page)")
+            k += 1
+    finally:
+        conn.close()
+
+
+def cmd_ocr_eval(cfg, args):
+    from .vision import make_ocr
+    from .vision.ocr_eval import evaluate, make_truth
+
+    root, ocr = Path(args.dir), make_ocr(cfg["ocr"])
+    if args.make_truth:
+        make_truth(root, cfg["vision"], ocr)
+    else:
+        evaluate(root, cfg["vision"], ocr)
 
 
 def cmd_ocr(cfg, args):
@@ -528,6 +578,13 @@ def main(argv=None):
     ui.add_argument("--images", help="use a folder of photos instead of the camera (Flip advances)")
     ui.add_argument("--out", help="scan folder (default scans/<timestamp>)")
     ui.add_argument("--quiet", action="store_true", help="print instead of speaking")
+    cs = sub.add_parser("capture-set", help="capture live frames per spread for an OCR test set")
+    cs.add_argument("out", nargs="?", default="data/ocr_eval")
+    cs.add_argument("--frames", type=int, default=5)
+    cs.add_argument("--gap", type=float, default=0.4, help="seconds between frames")
+    oe = sub.add_parser("ocr-eval", help="score OCR methods on the test set (data/ocr_eval)")
+    oe.add_argument("dir", nargs="?", default="data/ocr_eval")
+    oe.add_argument("--make-truth", action="store_true", help="draft truth.*.txt from refs/ photos")
     o = sub.add_parser("ocr")
     o.add_argument("image")
     f = sub.add_parser("flip")
@@ -542,7 +599,7 @@ def main(argv=None):
     handlers = {"read": cmd_read, "scan": cmd_scan, "check": cmd_check, "pencil": cmd_pencil,
                 "save-pose": cmd_save_pose, "calibrate-book": cmd_calibrate_book,
                 "calibrate-tool-mask": cmd_calibrate_tool_mask, "calibrate-view": cmd_calibrate_view,
-                "webcams": cmd_webcams, "watch-flip": cmd_watch_flip, "pdf": cmd_pdf, "ui": cmd_ui,
+                "webcams": cmd_webcams, "watch-flip": cmd_watch_flip, "pdf": cmd_pdf, "ui": cmd_ui, "capture-set": cmd_capture_set, "ocr-eval": cmd_ocr_eval,
                 "overlay": cmd_overlay, "vision": cmd_vision, "ocr": cmd_ocr, "flip": cmd_flip}
     handlers[args.cmd](cfg, args)
 
