@@ -76,6 +76,9 @@ class Controller:
         self.cfg, self.camera = cfg, camera
         self.ocr = make_ocr(cfg["ocr"])
         self.speaker = make_speaker(cfg["speech"])
+        say = getattr(self.speaker, "_say", None)
+        if hasattr(say, "warm"):               # ElevenLabs: fetch the fixed replies now, play instantly later
+            say.warm(list(ACKS.values()) + ["Hang on, I'm still busy.", "Sorry, I didn't catch that."])
         self.llm = make_llm(cfg.get("llm"))
         self.scanner = Scanner(scan_dir, cfg)
         default = [sys.executable, "-m", "bookworm"] + (["--config", config_path] if config_path else []) + ["flip"]

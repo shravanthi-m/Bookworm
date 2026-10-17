@@ -93,6 +93,8 @@ class BackgroundSpeaker:
             self._paused = []                       # new reading: forget an old pause
         for sentence in self.SENTENCE.split(text.strip()):
             if sentence:
+                if hasattr(self._say, "prefetch"):     # start downloading audio now (ElevenLabs)
+                    self._say.prefetch(sentence)
                 self._q.put((sentence, resumable))
 
     def wait(self) -> None:
@@ -119,6 +121,8 @@ class BackgroundSpeaker:
         """Carry on from the sentence stop() interrupted. False if there's nothing to resume."""
         left, self._paused = self._paused, []
         for sentence in left:
+            if hasattr(self._say, "prefetch"):
+                self._say.prefetch(sentence)
             self._q.put((sentence, True))
         return bool(left)
 
@@ -128,9 +132,20 @@ class BackgroundSpeaker:
 
 
 def make_speaker(scfg: dict):
-    engine = scfg.get("engine", "system")
+    """speech.engine: auto (ElevenLabs if ELEVENLABS_API_KEY is set, else the system voice)
+    | elevenlabs | system | print."""
+    engine = scfg.get("engine", "auto")
     if engine == "print":
         return PrintSpeaker()
-    if engine == "system":
+    if engine in ("auto", "elevenlabs"):
+        from .elevenlabs import ElevenLabsSay, api_key
+
+        key = api_key()
+        if key:
+            print(f"[tts] voice: ElevenLabs (falls back to the system voice if slow)", flush=True)
+            return BackgroundSpeaker(ElevenLabsSay(key, _system_say(**scfg), **(scfg.get("elevenlabs") or {})))
+        if engine == "elevenlabs":
+            print("[tts] ELEVENLABS_API_KEY not in .env: using the system voice", flush=True)
+    if engine in ("auto", "elevenlabs", "system"):
         return BackgroundSpeaker(_system_say(**scfg))
-    raise ValueError(f"unknown speech engine {engine!r} (system | print)")
+    raise ValueError(f"unknown speech engine {engine!r} (auto | elevenlabs | system | print)")

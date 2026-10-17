@@ -99,9 +99,15 @@ verify:
   max_flip_retries: 2
 
 speech:
-  engine: system            # system (macOS `say` / Linux espeak-ng, spoken in background) | print
-  rate: 170                 # words per minute
-  voice: null               # e.g. "Samantha" on macOS (`say -v '?'` lists voices)
+  # auto = ElevenLabs when ELEVENLABS_API_KEY is in .env, else the system voice.
+  # system = macOS `say` / Linux espeak-ng. print = no audio. Too slow? set engine: system.
+  engine: auto
+  rate: 170                 # system voice: words per minute
+  voice: null               # system voice, e.g. "Samantha" (`say -v '?'` lists voices)
+  elevenlabs:
+    voice_id: JBFqnCBsd6RMkjVDRZzb   # any voice id from elevenlabs.io (Voices -> "..." -> Copy voice ID)
+    model: eleven_flash_v2_5         # their lowest-latency model
+    timeout_s: 4                     # wait this long for a clip, then use the system voice
 
 flip:
   use_vision_corner: true   # refine the page corner from the image before each flip
