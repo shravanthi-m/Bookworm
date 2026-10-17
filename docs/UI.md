@@ -32,7 +32,7 @@ You can run the page on **any laptop**. It reaches the arm and cameras through V
 | Button | What happens | Time |
 |---|---|---|
 | **Next page** (or → key) | turns the page, then refreshes the pages on screen | ~30 s (the flip) |
-| **Flip** | runs Midhat's recorded flip (`scripts/flip_path.py`), parks the arm, then **checks with the camera that the page turned**. If it didn't: "Oops, the page didn't turn. Let me try again." (up to 2 retries, then "Could you give me a hand?"). If the page number jumps by 4+: "I think I turned more than one page." | ~30 s per try |
+| **Flip** | runs Midhat's recorded flip (`scripts/flip_path.py`), then parks the arm out of view. (A camera check + "Oops, let me try again" retry exists but is off: `ui.verify_flip: true` turns it on.) | ~30 s |
 | **Read** | reads aloud from the top of the left page, ~60 words, in order (say "continue" for more) | ~3 s, then speaking |
 | **Scan** | saves both pages (image + text) and rebuilds the searchable PDF | ~8 s |
 | **Summarise** | 2-sentence, child-friendly summary of the pages, spoken (needs the OpenRouter key) | ~5 s |
