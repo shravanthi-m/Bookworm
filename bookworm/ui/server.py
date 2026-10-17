@@ -27,8 +27,7 @@ from ..vision.preprocess import rotate_frame
 
 PAGE = Path(__file__).with_name("index.html")
 ACTIONS = {"flip": ["flip"], "read": ["read"], "scan": ["scan"],
-           "flip_read": ["flip", "read"], "flip_scan": ["flip", "scan"],
-           "look": ["look"], "next": ["flip", "look"]}   # look = refresh the on-screen pages, no OCR
+           "flip_read": ["flip", "read"], "flip_scan": ["flip", "scan"]}
 
 
 class LazyViamCamera:
@@ -71,12 +70,7 @@ class Controller:
         self.frame = None                      # latest upright frame
         self.jpeg = b""
         self.lock = threading.Lock()
-        self.state = {"busy": False, "status": "Ready", "text": "", "pages": 0, "pdf": False,
-                      # book view: page images version, flip timing so the page-turn animation
-                      # lasts as long as the arm (measured after each flip; ui.flip_seconds until then)
-                      "spread_v": 0, "page_no": None, "flipping": False,
-                      "flip_s": float(cfg.get("ui", {}).get("flip_seconds", 31))}
-        self.page_jpg = {"left": b"", "right": b""}
+        self.state = {"busy": False, "status": "Ready", "text": "", "pages": 0, "pdf": False}
         self._proc = None
         self._stop = threading.Event()
         threading.Thread(target=self._feed_loop, daemon=True).start()
@@ -118,30 +112,7 @@ class Controller:
         frac = v["page_number_region"]
         left = self.ocr.page_number(ocr_image(self.ocr, pages["left"]), frac)
         right = self.ocr.page_number(ocr_image(self.ocr, pages["right"]), frac) if left is None else None
-        page_no = left if left is not None else (right - 1 if right else None)
-        self._show(pages, page_no)
-        return Spread(pages, [], page_no, results)
-
-    def _show(self, pages, page_no=None):
-        """Publish the straightened left/right page images for the book view."""
-        for side in ("left", "right"):
-            if side in pages:
-                ok, buf = cv2.imencode(".jpg", pages[side].color, [cv2.IMWRITE_JPEG_QUALITY, 88])
-                if ok:
-                    self.page_jpg[side] = buf.tobytes()
-        self.state["page_no"] = page_no
-        self.state["spread_v"] += 1
-
-    def _look(self):
-        """Refresh the on-screen pages from the current frame (no OCR, so it's quick)."""
-        time.sleep(0.4)                        # let the feed catch up after a flip
-        with self.lock:
-            frame = None if self.frame is None else self.frame.copy()
-        if frame is None:
-            raise RuntimeError("no camera frame yet")
-        self._show(process_shot(frame, "spread", dict(self.cfg["vision"], rotate=0)))
-        if self.state["status"] in ("Ready", "Flipped"):
-            self.state["status"] = "Ready"
+        return Spread(pages, [], left if left is not None else (right - 1 if right else None), results)
 
     # ---- actions ---------------------------------------------------------------
     def start(self, name: str) -> bool:
@@ -170,17 +141,10 @@ class Controller:
             self.state["busy"] = False
 
     def _flip(self):
-        self.state.update(status="Flipping…", flipping=True)
-        t0 = time.time()
-        try:
-            self._proc = subprocess.Popen(self.flip_cmd)
-            code = self._proc.wait()
-        finally:
-            self.state["flipping"] = False
-        if code != 0 and not self._stop.is_set():
-            raise RuntimeError(f"flip exited with {code}")
-        if not self._stop.is_set():
-            self.state["flip_s"] = round(time.time() - t0, 1)   # next animation matches the real arm
+        self.state["status"] = "Flipping…"
+        self._proc = subprocess.Popen(self.flip_cmd)
+        if self._proc.wait() != 0 and not self._stop.is_set():
+            raise RuntimeError(f"flip exited with {self._proc.returncode}")
         if hasattr(self.camera, "advance"):    # photo playback stands in for a real flip
             self.camera.advance()
         self.state["status"] = "Flipped"
@@ -224,19 +188,6 @@ def serve(ctrl: Controller, port: int = 8000):
                 self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
             elif self.path == "/state":
                 self._send(200, json.dumps(ctrl.state).encode(), "application/json")
-            elif self.path.startswith("/static/"):            # decor images that ship with the page
-                f = PAGE.parent / Path(self.path.split("?")[0]).name
-                types = {".png": "image/png", ".webp": "image/webp", ".svg": "image/svg+xml", ".jpg": "image/jpeg"}
-                if f.suffix in types and f.is_file():
-                    self._send(200, f.read_bytes(), types[f.suffix])
-                else:
-                    self._send(404, b"not found", "text/plain")
-            elif self.path.split("?")[0] in ("/page/left.jpg", "/page/right.jpg"):
-                jpg = ctrl.page_jpg[self.path.split("?")[0][6:-4]]
-                if jpg:
-                    self._send(200, jpg, "image/jpeg")
-                else:
-                    self._send(404, b"no page yet", "text/plain")
             elif self.path.startswith("/book.pdf") and (ctrl.scanner.out / "book.pdf").exists():
                 self._send(200, (ctrl.scanner.out / "book.pdf").read_bytes(), "application/pdf")
             elif self.path == "/feed":
