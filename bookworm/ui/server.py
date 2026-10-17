@@ -19,7 +19,7 @@ from pathlib import Path
 import cv2
 
 from ..llm import LlmError, make_llm, summarize
-from ..modes import Scanner, excerpt
+from ..modes import Scanner, excerpt, from_top
 from ..session import RunSummary, Spread, best_of_frames
 from ..speech import make_speaker
 from ..vision import make_ocr, ocr_image, process_shot
@@ -94,6 +94,7 @@ class Controller:
                       "flip_s": float(cfg.get("ui", {}).get("flip_seconds", 31))}
         self.page_jpg = {"left": b"", "right": b""}
         self._proc = None
+        self._rest = ""                        # words of the spread not read yet ("continue" reads on)
         self._stop = threading.Event()
         threading.Thread(target=self._feed_loop, daemon=True).start()
 
@@ -230,7 +231,16 @@ class Controller:
         self.state["status"] = done
 
     def _resume(self):
-        self.state["status"] = "Continuing" if self.speaker.resume() else "Nothing to continue"
+        """Pick up an interrupted sentence; after a finished Read, read the next chunk of the spread."""
+        if self.speaker.resume():
+            self.state["status"] = "Continuing"
+        elif self._rest:
+            text, self._rest = from_top([self._rest], self.cfg["modes"]["read"].get("max_words", 60))
+            self.state["text"] = text
+            self.speaker.say(text)
+            self.state["status"] = "Reading on" + ("" if self._rest else " (end of the spread)")
+        else:
+            self.state["status"] = "Nothing to continue"
 
     def _where(self):
         self._goto("where", "Checking the arm…", "")
@@ -261,9 +271,12 @@ class Controller:
         self.state["status"] = "Reading…"
         spread = self._spread(self.cfg["modes"]["read"].get("frames", 1))   # 1 frame: fast
         r = self.cfg["modes"]["read"]
-        parts = [excerpt(spread.results[s].text, r.get("max_words_per_page"),
-                         r.get("min_sentence_quality", 0.95)) for s in r["read_order"]]
-        text = " ".join(p for p in parts if p)
+        if r.get("style", "from_top") == "from_top":     # top of the left page, in order
+            text, self._rest = from_top([spread.results[s].text for s in r["read_order"]], r.get("max_words", 60))
+        else:                                             # "clean": only near-perfect sentences
+            parts = [excerpt(spread.results[s].text, r.get("max_words_per_page"),
+                             r.get("min_sentence_quality", 0.95)) for s in r["read_order"]]
+            text, self._rest = " ".join(p for p in parts if p), ""
         if not text:        # no clean sentence: read the start of the page anyway, better than silence
             raw = " ".join(spread.results[s].text for s in r["read_order"]).split()
             text = " ".join(raw[2:2 + (r.get("max_words_per_page") or 30)])   # skip the running header

@@ -49,8 +49,11 @@ modes:
     px_per_mm: 6            # warp resolution, enough for OCR
     read_order: [left, right]
     frames: 1               # frames OCR'd for Read/Summarise (1 = fastest; scan uses ocr.frames + voting)
-    max_words_per_page: 30  # demo-friendly: read a few sentences per page (null = whole page)
-    min_sentence_quality: 0.95  # only read sentences whose words are ~all real words (skips OCR noise)
+    style: from_top         # from_top: from the top of the left page, in order; "continue" reads on
+                            # clean: only near-perfect sentences (for poor OCR; skips around the page)
+    max_words: 60           # from_top: words per Read / per "continue" (finishes the sentence)
+    max_words_per_page: 30  # clean: a few sentences per page
+    min_sentence_quality: 0.95  # clean: only read sentences whose words are ~all real words
   scan:
     shots: [{pose: scan_left, region: left}, {pose: scan_right, region: right}]
     px_per_mm: 12           # ~300 dpi archival scan
