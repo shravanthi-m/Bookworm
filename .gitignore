@@ -16,5 +16,7 @@ venv/
 # Local data / overrides
 runs/
 scans/
+# OCR test images: book pages are copyrighted, keep them local
+data/
 config/local.yaml
 .DS_Store
