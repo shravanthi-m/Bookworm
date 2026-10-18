@@ -296,10 +296,12 @@ class Controller:
             self.state["flip_step"] = f"{tag}{name}"   # the page turns the on-screen leaf in step with this
 
         self._arm = conn.component(Arm, self.cfg["robot"].get("arm", "arm"))   # Stop calls arm.stop() on it
+        # ui.flip_dynamic: the path follows the book (workshop calibration), else the recorded joints as taught
+        poses = flip_path.dynamic_poses(version, log=lambda m: print(m, flush=True))             if self.cfg.get("ui", {}).get("flip_dynamic") else {}
         try:
             code, msg = flip_path.play(conn, self._arm, flip_path.make_plan(path, between), pts,
                                        on_step=on_step, stopped=self._stop.is_set,
-                                       log=lambda m: print(m, flush=True))
+                                       log=lambda m: print(m, flush=True), poses=poses)
         except Exception:
             if self._stop.is_set():            # Stop halted the arm mid-move; that's not an error
                 return

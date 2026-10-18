@@ -58,11 +58,15 @@ Fixed setup, already configured in Viam: **uFactory arm + gripper + calibrated w
 bookworm/
   vision/       geometry.py (pixel↔world) · preprocess.py · page_detect.py · ocr.py · verify.py
   hardware/     base.py (Robot interface) · viam_robot.py · book_frame.py · flip.py · mock.py
+                dynamic_path.py (the recorded flip path, moved with the book) · sim.py · replay.py
+  gui/          the calibration workshop: server.py · index.html · book.py · book_model.py · flip.py (taped-gripper flip)
+  grasp/        step_drop.py (touch detection from the arm's joint load)
   modes/        read_aloud.py · scan.py
   speech/       text-to-speech
   session.py    shared capture → OCR → handler → flip → verify loop
   __main__.py   CLI
 config/default.yaml   every tunable: component names, poses, flip waypoints, thresholds
+config/waypoints.yaml the hand-taught flip paths (v1, v2)
 docs/UI.md            running the control page: buttons, voice commands, troubleshooting
 docs/PLAN.md          sprint plan · docs/DIVISION.md who owns what · docs/HARDWARE.md setup + 3D prints
 tests/                run without the arm, Viam, or a camera
@@ -105,6 +109,91 @@ python -m bookworm flip --times 5        # tune flip.sequence in config until fl
 ```
 
 Calibration is written to `config/local.yaml` (git-ignored, specific to your rig).
+
+## Calibration workshop
+
+```bash
+python -m bookworm gui            # http://localhost:8765, the real arm
+python -m bookworm gui --sim      # the same flow on a simulated arm and depth camera, no Viam
+```
+
+The workshop finds the book in the arm's own coordinates. Touch is what it trusts: the depth camera gives the
+book's outline, and the tool tip touching the page gives its height.
+
+![The workshop: the six book points found from home, drawn on the live wrist camera](docs/images/workshop-overview.png)
+
+Run the stages in order (**Run all** does stages 1–5):
+
+| # | Stage | What it does |
+|---|-------|--------------|
+| 1 | **Home & level** | Goes home and measures how far the table is tilted in the depth image, so depth can be levelled in software. |
+| 2 | **First capture** | One photo from home. The book's outline gives six points: the four corners and the centre of each page. |
+| 3 | **Depth scan** | The wrist camera looks at the book from several spots around its middle and fuses the views into a height map. |
+| 4 | **Z link** | The arm steps down 2 mm at a time, first onto bare table, then onto the left page. It reads the joint load after every step. A jump in load is the touch. That gives the table's height and the book's height, from the motors alone. |
+| 5 | **Book model** | The page level is fitted to the heights the arm actually touched. The depth map gives the outline and is kept for reference only. |
+| 6 | **Touch calibration** | A light touch on each chosen corner, a set number of 2 mm steps above the measured book height. Back at home, click where each touch really landed on a fresh photo. That gives the XY correction. |
+| 7 | **Touch demo** | Touches the chosen book points, the same number of steps above the model's height. |
+| 8 | **Page flip** | Runs the recorded flip path, moved to follow the book (see *Dynamic arm* below), or the taped-gripper flip. |
+
+![Stages 1–3: level, first capture and depth scan results](docs/images/calibration-stages.png)
+
+The Z link finds both heights by load. The charts plot the tip height at each step against the fitted trend. Below
+them, they show how far each step's position and joint load are off that trend. The red dot is where the load
+jumped: the touch.
+
+![Z link: table, then the left page, found by joint load](docs/images/zlink-by-load.png)
+
+The depth scan is shown as a 3D surface and a top-down height map. It gives the book's outline, and its numbers
+are checked against the touches:
+
+<p>
+  <img src="docs/images/depth-surface-3d.png" alt="3D height surface of the book" width="49%">
+  <img src="docs/images/depth-top-down.png" alt="Top-down height map with the book outline" width="49%">
+</p>
+
+Safety, built into every stage:
+- The arm moves slowly and in small steps over the book, and STOP (or Space/Esc) halts it at once.
+- Between points it rises to half the home height before moving sideways.
+- It tells a Viam motion-planner refusal (nothing moved) apart from the arm's own collision stop, which it clears
+  before backing off.
+- The book's height and position are saved to `config/local.yaml` and `data/` (both git-ignored, specific to your
+  rig).
+
+## Dynamic arm: the flip path follows the book
+
+The flip paths in `config/waypoints.yaml` were taught by hand with the book in one place. Each point is a fixed
+spot in the arm's world, so if the book is bumped, the eraser misses. With **dynamic** on, every point moves with
+the book instead:
+
+1. **Reference:** where the book was when the path was taught. You set it once, with the book where the recorded
+   path flips well.
+2. **Now:** where the book is now. It comes from the workshop's First capture and Z link, which write
+   `data/book_frame.json`: the book's centre, the angle from its left page to its right page, and its page height.
+3. **Each flip:** every taught pose is turned about the vertical axis by the change in the book's angle, shifted by
+   the change in its centre, and raised or lowered with its height. The pencil turns with it, so it meets the page
+   at the angle it was taught at (`bookworm/hardware/dynamic_path.py`).
+
+| Situation | What plays |
+|-----------|------------|
+| No reference set yet, or no current book position | The recorded joints, exactly as taught |
+| The book hasn't moved (< 1.5 mm, < 0.3°) | The recorded joints, exactly as taught |
+| The book moved | The moved poses, through the Viam motion planner; each one checked to 3 mm |
+| The book moved more than 120 mm or turned more than 25° | Refused: move the book back or teach the path again |
+
+```bash
+# with the book where the recorded path works: run First capture + Z link in the workshop, then
+python scripts/flip_path.py --set-reference       # (or "The book is where the path works" in the workshop)
+
+# later, wherever the book is: First capture + Z link again, then
+python scripts/flip_path.py --path v2 --dynamic --dry-run   # print the moved points
+python scripts/flip_path.py --path v2 --dynamic             # flip
+```
+
+The control page uses it too: `ui.flip_dynamic: true` in `config/phone_mount.yaml`. The workshop's **Page flip**
+card shows the reference, where the book is now and how far it has moved, and runs either motion.
+
+The taught poses belong to the arm they were recorded on. The reference and the book frame have to come from that
+same arm's world frame.
 
 ## Development without the arm
 

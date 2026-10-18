@@ -42,6 +42,40 @@ class Robot(ABC):
         """Intrinsics + current camera pose, or None if unknown (mock / photos)."""
         return None
 
+    def stop(self) -> None:
+        """Halt arm and gripper motion immediately."""
+
+    def joint_positions(self) -> list[float]:
+        """Joint angles in degrees."""
+        raise HardwareError("this robot backend can't read joint positions")
+
+    def move_joints(self, degrees: list[float]) -> None:
+        """Move to joint angles (degrees). Predictable, unlike orientation changes near vertical."""
+        raise HardwareError("this robot backend can't move by joints")
+
+    def set_speed(self, deg_per_s: float) -> None:
+        """Set the arm's joint speed (deg/s). Raises HardwareError if the backend can't."""
+        raise HardwareError("this robot backend can't set the arm speed")
+
+    def gripper_position(self, value: float) -> None:
+        """Move the gripper to a specific opening (0 = closed .. 850 = fully open)."""
+        raise HardwareError("this robot backend can't set a gripper position")
+
+    def gripper_get(self) -> float | None:
+        """Current gripper opening, or None if unknown."""
+        return None
+
+    def capture_depth(self) -> np.ndarray:
+        """Depth image aligned to the colour frame, HxW uint16 millimetres (0 = no reading)."""
+        raise HardwareError("this robot backend has no depth camera")
+
+    def joint_load(self) -> list[float] | None:
+        """Per-joint load (torque) as the arm reports it, or None if this backend has no such reading."""
+        return None
+
+    def clear_error(self) -> None:
+        """Clear a fault the arm raised (e.g. a collision stop) so it accepts motion commands again. No-op by default."""
+
     def close(self) -> None:
         pass
 

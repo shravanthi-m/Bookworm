@@ -17,6 +17,15 @@ import numpy as np
 
 from .base import POSE_KEYS, CameraGeometry, HardwareError, Robot
 
+# Errors that mean "this call was cut off", not "this call is wrong". SESSION_EXPIRED: the safety heartbeat lapsed, so
+# viam-server stopped the arm and rejected the call; the SDK resets the session and the next call opens a new one.
+TRANSIENT = ("session_expired", "context canceled", "channel closed", "streamterminated", "connection lost", "connection reset")
+
+
+def is_transient(e: BaseException) -> bool:
+    msg = f"{type(e).__name__}: {e}".lower()
+    return any(t in msg for t in TRANSIENT)
+
 
 class ViamConnection:
     def __init__(self):
@@ -53,6 +62,21 @@ class ViamConnection:
 
     def call(self, coro, timeout: float = 60.0):
         return asyncio.run_coroutine_threadsafe(coro, self.loop).result(timeout)
+
+    def call_retry(self, make, timeout: float = 60.0, attempts: int = 3, say=None, what: str = "robot call"):
+        """``make()`` builds the coroutine, so a call cut off by a connection hiccup can be sent again. Only safe for
+        idempotent calls - every call here is (moves go to an absolute target, reads read, set_speed sets)."""
+        import time
+
+        for k in range(attempts):
+            try:
+                return self.call(make(), timeout)
+            except Exception as e:  # noqa: BLE001
+                if k == attempts - 1 or not is_transient(e):
+                    raise
+                if say:
+                    say(f"{what}: connection hiccup ({str(e)[:60]}) - retrying ({k + 2} of {attempts})")
+                time.sleep(0.4 * (k + 1))
 
     def resource_names(self) -> list[str]:
         return [r.name for r in self.machine.resource_names]
@@ -96,6 +120,7 @@ class ViamRobot(Robot):
         self._names = (arm, gripper, camera)
         self._lookup()
         self._intrinsics = None
+        self.say = None                      # set by the workshop GUI so retries show up in its log
 
     def _lookup(self) -> None:
         from viam.components.arm import Arm
@@ -111,23 +136,67 @@ class ViamRobot(Robot):
         self.conn.reconnect()
         self._lookup()
 
+    def _c(self, make, timeout: float = 60.0, attempts: int = 3, what: str = "robot call"):
+        return self.conn.call_retry(make, timeout, attempts, say=self.say, what=what)
+
     # ---- arm / gripper ------------------------------------------------------
     def move_to(self, pose):
         from viam.proto.common import Pose
 
-        self.conn.call(self.arm.move_to_position(Pose(**{k: float(pose[k]) for k in POSE_KEYS})))
+        self._c(lambda: self.arm.move_to_position(Pose(**{k: float(pose[k]) for k in POSE_KEYS})))
 
     def end_pose(self):
-        p = self.conn.call(self.arm.get_end_position())
+        p = self._c(lambda: self.arm.get_end_position())
         return {k: getattr(p, k) for k in POSE_KEYS}
 
     def gripper(self, action):
         if action == "open":
-            self.conn.call(self.grip.open())
+            self._c(lambda: self.grip.open())
         elif action == "grab":
-            self.conn.call(self.grip.grab())
+            self._c(lambda: self.grip.grab())
         else:
             raise HardwareError(f"unknown gripper action {action!r}")
+
+    def joint_positions(self):
+        return list(self._c(lambda: self.arm.get_joint_positions()).values)
+
+    def move_joints(self, degrees):
+        from viam.proto.component.arm import JointPositions
+
+        self._c(lambda: self.arm.move_to_joint_positions(JointPositions(values=[float(v) for v in degrees])))
+
+    def set_speed(self, deg_per_s):
+        r = self._c(lambda: self.arm.do_command({"set_speed": float(deg_per_s)}))
+        if r and r.get("error"):
+            raise HardwareError(f"set_speed failed: {r['error']}")
+
+    def joint_load(self):
+        """Per-joint torque from the xArm module's 'load' DoCommand; None if the module does not answer with a list."""
+        r = self._c(lambda: self.arm.do_command({"load": ""}))
+        v = (r or {}).get("load")
+        try:
+            return [float(x) for x in v] if v else None
+        except (TypeError, ValueError):
+            return None
+
+    def clear_error(self):
+        """Clear the xArm's error state (needed after a collision stop, per the module's README)."""
+        r = self._c(lambda: self.arm.do_command({"clear_error": True}))
+        if r and r.get("error"):
+            raise HardwareError(f"clear_error failed: {r['error']}")
+
+    def gripper_position(self, value):
+        self._c(lambda: self.grip.do_command({"set": float(value)}))
+
+    def gripper_get(self):
+        return self._c(lambda: self.grip.do_command({"get": True})).get("pos")
+
+    def stop(self):
+        """Stop the arm and the gripper at once (both calls issued concurrently)."""
+        async def _stop():
+            await asyncio.gather(self.arm.stop(), self.grip.stop(), return_exceptions=True)
+
+        self._c(lambda: _stop(), timeout=10)
 
     # ---- camera -------------------------------------------------------------
     def capture(self):
@@ -141,11 +210,11 @@ class ViamRobot(Robot):
         # RealSense returns 'color' (jpeg, ~70 KB) and 'depth' (~1.8 MB). Asking for colour only
         # cut capture from ~485 ms to ~31 ms on the rig.
         try:
-            images, _ = self.conn.call(self.cam.get_images(filter_source_names=["color"]))
-        except Exception:  # noqa: BLE001 - e.g. a webcam has no source called "color"
+            images, _ = self._c(lambda: self.cam.get_images(filter_source_names=["color"]))
+        except Exception:  # noqa: BLE001 - e.g. a webcam has no source called "color", or an older SDK
             images = []
         if not images:
-            images, _ = self.conn.call(self.cam.get_images())
+            images, _ = self._c(lambda: self.cam.get_images())
         color = [im for im in images if not im.mime_type.startswith("image/vnd.viam.dep")]
         if not color:
             raise HardwareError("wrist camera returned no colour image")
@@ -155,8 +224,17 @@ class ViamRobot(Robot):
         self._last_size = frame.shape[1], frame.shape[0]
         return frame
 
+    def capture_depth(self):
+        from ..vision.depth_height import decode_depth
+
+        images, _ = self._c(lambda: self.cam.get_images(filter_source_names=["depth"]))
+        dep = [im for im in images if im.mime_type.startswith("image/vnd.viam.dep")]
+        if not dep:
+            raise HardwareError("wrist camera returned no depth image")
+        return decode_depth(dep[0].data)
+
     def _load_intrinsics(self):
-        props = self.conn.call(self.cam.get_properties())
+        props = self._c(lambda: self.cam.get_properties())
         ip = props.intrinsic_parameters
         if not ip.focal_x_px:
             raise HardwareError("wrist camera has no intrinsic_parameters in its Viam config")
@@ -174,7 +252,7 @@ class ViamRobot(Robot):
 
         def to_world(x, y, z):
             q = PoseInFrame(reference_frame=self.camera_name, pose=Pose(x=x, y=y, z=z, o_z=1))
-            p = self.conn.call(self.conn.machine.transform_pose(q, "world")).pose
+            p = self._c(lambda: self.conn.machine.transform_pose(q, "world")).pose
             return np.array([p.x, p.y, p.z])
 
         o = to_world(0, 0, 0)

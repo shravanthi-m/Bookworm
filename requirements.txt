@@ -9,3 +9,4 @@ pypdf>=4.0
 reportlab>=4.0
 pytest>=7.0
 ocrmac>=1.0; sys_platform == "darwin"
+flask>=3.0
