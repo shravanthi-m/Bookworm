@@ -146,10 +146,6 @@ ui:
   # v1 | v2: the Flip button plays that recorded path (scripts/flip_path.py) over the page's
   # own robot connection. null = run flip_command instead.
   flip_path: null
-  # true: the recorded path follows the book (moved/turned since it was taught), from the workshop GUI's
-  # calibration (data/book_frame.json) and the reference set with scripts/flip_path.py --set-reference.
-  # No reference yet, or the book hasn't moved: the recorded joints play exactly as taught.
-  flip_dynamic: false
   # Command the Flip button runs when flip_path is null, e.g. a teammate's script:
   # "python scripts/flip.py --once". null = python -m bookworm flip (with the same --config).
   flip_command: null
@@ -159,40 +155,3 @@ ui:
 run:
   blank_spreads_to_stop: 2  # consecutive blank spreads => end of book
   save_dir: runs            # every capture + OCR text saved here for debugging
-
-gui:                        # local dev GUI (python -m bookworm gui). Setup: 1 home & level, 2 first capture, 3 depth scan, 4 z link, 5 book model, 6 touch demo
-  probe:
-    tool_length_mm: 155     # THE manual setting: tool tip below the flange (fingertips; change it when a pencil is fitted). Also on the Setup tab
-    slow_deg_s: 20          # arm speed for every Setup motion
-    restore_deg_s: 60       # speed put back afterwards (matches the xArm fragment)
-  page_plane_z_mm: 35       # page z assumed only before there is a depth map (for drawing the points)
-  tip_min_z_mm: 25          # tool-tip floor until the z link has measured the table; after that the floor is the table + 1 mm
-  limits:                   # arm flange limits for jog and every move, world mm (Arm Farm: walls x=740, y=+-500; ceiling z=1050)
-    x: [-400, 650]
-    y: [-450, 450]
-    z: [120, 600]
-  depth:                    # measured values (table_slope, arm_offset_mm, ...) are written to config/local.yaml by the stages
-    arm_offset_mm: 0        # the table top's z in the arm frame: measured by stage 4 (z link)
-    scan_mode: pass         # stage 3: pass = views around the book's midpoint at home height; home = one view, no motion
-    pass_offsets_mm:        # camera-pass views: (dx, dy) around the book midpoint (from the first capture) at home height;
-      - [0, 0]              # refused moves are skipped
-      - [70, 0]
-      - [-70, 0]
-      - [0, 80]
-      - [0, -80]
-    height_settle_s: 0.4    # touch ladders: wait after each step before reading the pose and the load
-    height_step_wait_s: 1.2 # z link: time to press "It's touching" at each step (the press is the fallback to the load)
-    z_link_search_below_mm: 10  # the z link lowers the tip at most this far below the expected table z
-    z_link_book_clear_mm: 80    # the auto-picked table spot is at least this far from the book (an open finger reaches ~45 mm)
-    step_drop:              # contact detection in every touch ladder (z link and demo)
-      enabled: true
-      mode: regression      # regression = a step whose joint load (or real position) leaves the trend of the steps before it.
-                            # fixed = position only: on the xArm the read-back follows the command even when pushing, so it misses contact
-      load_joints: [1, 2]   # 0-based joints whose load is watched: the xArm6's joints 2 and 3 carry a downward push
-      load_floor: 0.3       # noise floor of the load reading (Nm); free-air steps vary by ~0.05 Nm on those joints
-      load_k: 8.0           # contact: the load is this many standard deviations off its trend (the real hit on 2026-10-17 scored 466)
-      k: 5.0                # contact: the tip landed this many standard deviations above its trend...
-      pos_floor_mm: 0.3     # ...and at least this far
-      min_drop_mm: 1.0      # fixed rule: a 2 mm step that goes down less than this
-      use_load: true        # read the joint torque each step (xArm module DoCommand "load")
-    record_views: true      # save every real depth view to data/depth/raw/ for offline replay (gui --replay)

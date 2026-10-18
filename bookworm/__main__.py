@@ -28,7 +28,6 @@ Development
     vlm-check lift|holder  ask a vision model (OpenRouter) if the flip is going right (never moves the arm)
     ocr IMAGE              vision pipeline on one photo; debug images in runs/debug/
     flip [--times N]       run the flip motion only (tuning)
-    gui [--sim|--replay DIR|--mock]  local browser GUI (--sim / --replay work offline, no Viam)
 """
 from __future__ import annotations
 
@@ -554,10 +553,6 @@ def cmd_flip(cfg, args):
 
 
 def main(argv=None):
-    argv = sys.argv[1:] if argv is None else argv
-    if argv and argv[0] == "gui":          # own parser: python -m bookworm gui [--mock] [--port N]
-        from .gui.__main__ import main as gui_main
-        return gui_main(argv[1:])
     p = argparse.ArgumentParser(prog="bookworm", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--config", help="YAML overriding config/default.yaml (default: config/local.yaml if present)")

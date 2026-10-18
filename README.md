@@ -110,11 +110,29 @@ python -m bookworm flip --times 5        # tune flip.sequence in config until fl
 
 Calibration is written to `config/local.yaml` (git-ignored, specific to your rig).
 
+## Two ways in: the original code, and the dynamic code
+
+Everything above is main's original code, unchanged: `python -m bookworm …`, `scripts/flip_path.py` and the control
+page play the recorded flip exactly as taught. The calibration workshop and the dynamic flip path have their own
+entry points and files, so they never change how the original runs:
+
+| | Original (main) | Dynamic |
+|---|---|---|
+| Flip from the command line | `scripts/flip_path.py` | `scripts/flip_path_dynamic.py` |
+| Control page | `python -m bookworm ui` | `python -m bookworm.ui.dynamic` |
+| Calibration | `python -m bookworm calibrate-book` | `python -m bookworm.gui` (the workshop) |
+| Config | `config/default.yaml` | + `config/workshop.yaml` |
+| Requirements | `requirements.txt` | `requirements-workshop.txt` (adds Flask) |
+
+The dynamic code adds files only: `bookworm/gui/`, `bookworm/grasp/`, `bookworm/ui/dynamic.py`,
+`bookworm/hardware/{dynamic_path,workshop,sim,replay}.py` and a few `bookworm/vision/depth_*.py`.
+
 ## Calibration workshop
 
 ```bash
-python -m bookworm gui            # http://localhost:8765, the real arm
-python -m bookworm gui --sim      # the same flow on a simulated arm and depth camera, no Viam
+pip install -r requirements-workshop.txt
+python -m bookworm.gui            # http://localhost:8765, the real arm
+python -m bookworm.gui --sim      # the same flow on a simulated arm and depth camera, no Viam
 ```
 
 The workshop finds the book in the arm's own coordinates. Touch is what it trusts: the depth camera gives the
@@ -182,15 +200,18 @@ the book instead:
 
 ```bash
 # with the book where the recorded path works: run First capture + Z link in the workshop, then
-python scripts/flip_path.py --set-reference       # (or "The book is where the path works" in the workshop)
+python scripts/flip_path_dynamic.py --set-reference      # (or "The book is where the path works" in the workshop)
 
 # later, wherever the book is: First capture + Z link again, then
-python scripts/flip_path.py --path v2 --dynamic --dry-run   # print the moved points
-python scripts/flip_path.py --path v2 --dynamic             # flip
+python scripts/flip_path_dynamic.py --path v2 --dry-run  # print the moved points
+python scripts/flip_path_dynamic.py --path v2            # flip
+
+python -m bookworm.ui.dynamic --config config/phone_mount.yaml   # the control page, flipping with the moved path
 ```
 
-The control page uses it too: `ui.flip_dynamic: true` in `config/phone_mount.yaml`. The workshop's **Page flip**
-card shows the reference, where the book is now and how far it has moved, and runs either motion.
+`scripts/flip_path_dynamic.py` reuses main's `scripts/flip_path.py` unchanged for loading the path and for playing
+any point that hasn't moved. The workshop's **Page flip** card shows the reference, where the book is now and how far
+it has moved, and runs either motion.
 
 The taught poses belong to the arm they were recorded on. The reference and the book frame have to come from that
 same arm's world frame.

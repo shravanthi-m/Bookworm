@@ -1,6 +1,6 @@
 import pytest
 
-from bookworm.hardware.viam_robot import ViamConnection, is_transient
+from bookworm.hardware.workshop import WorkshopConnection as ViamConnection, is_transient
 
 
 class Expired(Exception):

@@ -96,7 +96,7 @@ def run(robot, steps, say=print, stopped=lambda: False) -> None:
             time.sleep(st["dwell"])
 
 
-if __name__ == "__main__":                                     # python -m bookworm.gui.flip [runs]  (GUI must be up)
+if __name__ == "__main__":                                     # python -m bookworm.gui.flip [runs]  (workshop must be up)
     import json
     import sys
     import time
@@ -105,8 +105,8 @@ if __name__ == "__main__":                                     # python -m bookw
 
     import yaml
 
-    from ..config import load_config
-    from ..rig import build_robot
+    from ..hardware.workshop import build_workshop_robot
+    from .__main__ import LOCAL_CFG, load_workshop_config
 
     root = Path(__file__).resolve().parents[2]
     flow = json.load(urllib.request.urlopen("http://localhost:8765/api/flow", timeout=5))
@@ -120,8 +120,8 @@ if __name__ == "__main__":                                     # python -m bookw
     f = frame(pts["bl"], pts["tl"], pts["cl"], pts["cr"], loc["calibration"]["offset_mm"], page_z,
               loc["probe"]["tool_length_mm"])
     full = yaml.safe_load((root / "config" / "local.yaml").read_text(encoding="utf-8"))
-    cfg = load_config()
-    robot, close = build_robot(cfg)
+    cfg = load_workshop_config(LOCAL_CFG)
+    robot, close = build_workshop_robot(cfg)
 
     for a in sys.argv[1:]:                                     # NAME=value overrides, e.g. PICK_U=-4 CARRY_R=90
         k, _, v = a.partition("=")

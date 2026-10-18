@@ -1,8 +1,8 @@
 """Bookworm dev GUI: a guided setup that finds the book in the arm's own coordinates, then a touch demo.
 
-    python -m bookworm gui              # the real arm (credentials from .env)
-    python -m bookworm gui --sim        # offline: simulated arm and depth camera
-    python -m bookworm gui --replay DIR # offline: depth views recorded on the rig
+    python -m bookworm.gui              # the real arm (credentials from .env)
+    python -m bookworm.gui --sim        # offline: simulated arm and depth camera
+    python -m bookworm.gui --replay DIR # offline: depth views recorded on the rig
 
 Setup, in order (each stage can also be run on its own):
   1 Home & level   go home and fit the table plane in the depth image (the depth camera's tilt is removed in software)
@@ -1163,7 +1163,7 @@ def create_app(robot, cfg: dict | None = None) -> Flask:
                         set_stage(k, "fail", str(e))
                         break
                     except Exception as e:  # noqa: BLE001
-                        from ..hardware.viam_robot import is_transient
+                        from ..hardware.workshop import is_transient
 
                         if is_transient(e):
                             set_stage(k, "fail", f"the connection to the robot dropped and did not come back after 3 tries ({e}). "

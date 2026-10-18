@@ -20,10 +20,3 @@ scans/
 data/
 config/local.yaml
 .DS_Store
-
-# dev scratch + generated calibration captures
-temp/
-data/calibration/
-data/depth/
-data/book/
-data/demo/

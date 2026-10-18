@@ -1,4 +1,4 @@
-"""python -m bookworm.gui [--sim | --replay DIR | --mock] [--port 8765]
+"""The calibration workshop: python -m bookworm.gui [--sim | --replay DIR | --mock] [--port 8765]
 
 --sim      offline: simulated arm + RGB-D camera over the measured book scene
 --replay   offline: serve depth views recorded on the rig (data/depth/raw/<session>)
@@ -10,15 +10,26 @@ import shutil
 import webbrowser
 from pathlib import Path
 
-from ..config import load_config
-from ..rig import build_robot
+from ..config import _merge, load_config
+from ..hardware.workshop import build_workshop_robot
 from .server import create_app
 
 LOCAL_CFG = Path(__file__).resolve().parents[2] / "config" / "local.yaml"
+WORKSHOP_CFG = LOCAL_CFG.parent / "workshop.yaml"
+
+
+def load_workshop_config(local: Path | None) -> dict:
+    """config/default.yaml < config/workshop.yaml < the rig's local.yaml."""
+    import yaml
+
+    cfg = _merge(load_config(), yaml.safe_load(WORKSHOP_CFG.read_text(encoding="utf-8")) or {})
+    if local is not None and local.exists():
+        cfg = _merge(cfg, yaml.safe_load(local.read_text(encoding="utf-8")) or {})
+    return cfg
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="Bookworm local dev GUI")
+    ap = argparse.ArgumentParser(description="Bookworm calibration workshop")
     ap.add_argument("--mock", action="store_true", help="fake robot, no Viam")
     ap.add_argument("--sim", action="store_true", help="offline simulated rig (arm, RGB-D camera)")
     ap.add_argument("--replay", metavar="DIR", help="offline replay of recorded depth views, e.g. data/depth/raw/<session>")
@@ -45,7 +56,7 @@ def main(argv=None):
             shutil.copy(LOCAL_CFG, local)                     # start from the rig's settings
         server.ROOT, server.LOCAL_CFG = sim_root, local
         print(f"offline mode: settings and data go to {sim_root} (config/local.yaml is not touched)")
-    cfg = load_config(local if local.exists() else None)
+    cfg = load_workshop_config(local)
     if args.sim:
         (cfg.get("gui") or {}).pop("calibration", None)    # the rig's XY correction is for its real camera, not the simulated one
         from ..hardware.sim import SimRobot
@@ -58,7 +69,7 @@ def main(argv=None):
         robot = ReplayRobot(args.replay, home_pose=(cfg.get("poses") or {}).get("home"), home_joints=cfg.get("home_joints"))
         close = robot.close
     else:
-        robot, close = build_robot(cfg, mock=args.mock)
+        robot, close = build_workshop_robot(cfg, mock=args.mock)
     app = create_app(robot, cfg=cfg)
     url = f"http://127.0.0.1:{args.port}/"
     print("Bookworm GUI:", url, "(Ctrl+C to quit)")

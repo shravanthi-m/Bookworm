@@ -1,4 +1,5 @@
-"""The recorded flip path moved with the book (bookworm/hardware/dynamic_path.py), with no robot."""
+"""The recorded flip path moved with the book (bookworm/hardware/dynamic_path.py, scripts/flip_path_dynamic.py),
+with no robot. scripts/flip_path.py (main) is used unchanged."""
 import math
 import sys
 from pathlib import Path
@@ -13,6 +14,7 @@ from bookworm.hardware import dynamic_path as dp
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import flip_path  # noqa: E402
+import flip_path_dynamic  # noqa: E402
 
 REF = {"center": [400.0, 0.0], "angle_deg": 90.0, "top_z": 35.0}
 WP = yaml.safe_load((ROOT / "config" / "waypoints.yaml").read_text())
@@ -98,7 +100,21 @@ def test_play_reaches_moved_points_as_poses():
     pts, path, between = flip_path.load("v2")
     poses = dp.plan(WP, "flip_path_v2", REF, {"center": [410.0, 5.0], "angle_deg": 92.0, "top_z": 35.0})["poses"]
     arm = PoseArm()
-    code, msg = flip_path.play(conn, arm, flip_path.make_plan(path, between), pts, poses=poses, log=lambda m: None)
+    code, msg = flip_path_dynamic.play(conn, arm, flip_path.make_plan(path, between), pts, poses, log=lambda m: None)
     assert code == 0, msg
     assert len(arm.poses) == 12 and arm.joints == []                     # 11 path points + park, all moved
     assert arm.poses[0].x == pytest.approx(poses["1"]["x"])
+
+
+def test_no_poses_is_mains_player_unchanged():
+    conn = SimpleNamespace(call=lambda v, timeout=None: v)
+    pts, path, between = flip_path.load("v2")
+    arm = PoseArm()
+    code, _ = flip_path_dynamic.play(conn, arm, flip_path.make_plan(path, between), pts, {}, log=lambda m: None)
+    assert code == 0 and arm.poses == [] and arm.joints[0] == pts["1"]
+
+
+def test_dry_run_without_a_reference_plays_as_taught(capsys):
+    assert flip_path_dynamic.main(["--path", "v2", "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert "recorded" in out and "1 -> 2" in out

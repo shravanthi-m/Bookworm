@@ -4,14 +4,6 @@
     .venv/bin/python scripts/flip_path.py --path v2    use the v2 path (flip_path_v2)
     .venv/bin/python scripts/flip_path.py --times 3    three pages
     .venv/bin/python scripts/flip_path.py --dry-run    print the moves, don't connect
-    .venv/bin/python scripts/flip_path.py --dynamic    follow the book: move the path with it (see below)
-    .venv/bin/python scripts/flip_path.py --set-reference   the book is where the path works: remember it
-
-Dynamic: the path was taught with the book in one place. With --dynamic (or `ui.flip_dynamic: true`)
-every point is carried by how far the book has moved and turned since then
-(bookworm/hardware/dynamic_path.py). The book's position now comes from the workshop GUI's first
-capture + Z link (data/book_frame.json); the reference is set once with --set-reference while the
-book sits where the recorded path works. If the book hasn't moved, the recorded joints play as taught.
 
 Paths: v1 = flip_path (original), v2 = flip_path_v2 (rubber-covered eraser, re-taught,
 numbered 1-11). v1 is the fallback if v2 misbehaves.
@@ -39,7 +31,6 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 WAYPOINTS = ROOT / "config" / "waypoints.yaml"
 MAX_JOINT_ERROR_DEG = 1.0
-MAX_POSE_ERROR_MM = 3.0             # dynamic points are reached as poses
 
 
 PATHS = {"v1": "flip_path", "v2": "flip_path_v2"}
@@ -71,24 +62,11 @@ def step_tag(version):
     return "" if version == "v1" else f"{version}:"
 
 
-def dynamic_poses(version="v1", frame_now=None, log=print):
-    """Poses that follow the book (bookworm/hardware/dynamic_path.py), or {} to play the recorded joints.
-    ``frame_now``: the current book frame (default: data/book_frame.json from the workshop's calibration)."""
-    from bookworm.hardware import dynamic_path as dp
-
-    d = yaml.safe_load(WAYPOINTS.read_text())
-    p = dp.plan(d, PATHS[version], dp.load_reference(), frame_now or dp.load_frame())
-    log(f"flip path: {p['mode']} ({p['why']})")
-    return p["poses"]
-
-
-def play(conn, arm, plan, pts, on_step=None, stopped=lambda: False, log=print, poses=None):
+def play(conn, arm, plan, pts, on_step=None, stopped=lambda: False, log=print):
     """Play ``plan`` over an open connection. Returns (exit code, message).
 
     on_step(name) is called before each move; stopped() is checked before each move and during
-    pauses (the caller halts the arm itself, e.g. the control page's Stop calls arm.stop()).
-    ``poses`` ({name: pose}, from dynamic_poses): those points are reached as poses that follow the book,
-    through the motion planner, instead of the recorded joints."""
+    pauses (the caller halts the arm itself, e.g. the control page's Stop calls arm.stop())."""
     from viam.proto.component.arm import JointPositions
 
     page, t_page = 1, time.time()
@@ -103,23 +81,9 @@ def play(conn, arm, plan, pts, on_step=None, stopped=lambda: False, log=print, p
                 time.sleep(min(0.1, end - time.time()))
             page, t_page = page + 1, time.time()
             continue
+        target = pts[step]
         if on_step:
             on_step(step)
-        if poses and step in poses:
-            from viam.proto.common import Pose
-
-            want = poses[step]
-            conn.call(arm.move_to_position(Pose(**{k: float(want[k]) for k in ("x", "y", "z", "o_x", "o_y", "o_z", "theta")})),
-                      timeout=120)
-            if stopped():
-                return 130, "stopped: arm halted where it is"
-            got = conn.call(arm.get_end_position())
-            err = ((got.x - want["x"]) ** 2 + (got.y - want["y"]) ** 2 + (got.z - want["z"]) ** 2) ** 0.5
-            if err > MAX_POSE_ERROR_MM:
-                conn.call(arm.stop())
-                return 2, f"STOPPED at {step}: {err:.1f} mm from the moved point"
-            continue
-        target = pts[step]
         conn.call(arm.move_to_joint_positions(JointPositions(values=target)), timeout=120)
         if stopped():
             return 130, "stopped: arm halted where it is"
@@ -137,29 +101,12 @@ def main(argv=None) -> int:
     ap.add_argument("--times", type=int, default=1, help="pages to turn (default 1)")
     ap.add_argument("--no-park", action="store_true", help="end at 0 instead of parking and pausing")
     ap.add_argument("--dry-run", action="store_true", help="print the moves without connecting")
-    ap.add_argument("--dynamic", action="store_true", help="move the path with the book (data/book_frame.json)")
-    ap.add_argument("--set-reference", action="store_true",
-                    help="remember the current book frame as where the path was taught, then exit")
     args = ap.parse_args(argv)
-
-    if args.set_reference:
-        from bookworm.hardware import dynamic_path as dp
-
-        now = dp.load_frame()
-        if now is None:
-            print("no current book frame: run the workshop GUI's first capture and Z link first", flush=True)
-            return 1
-        dp.set_reference(now)
-        print(f"reference book position set: centre {now['center']}, {now['angle_deg']:.1f} deg, top z {now['top_z']}")
-        return 0
 
     pts, path, between = load(args.path)
     plan = make_plan(path, between, args.times, park=not args.no_park)
-    poses = dynamic_poses(args.path) if args.dynamic else {}
     if args.dry_run:
         print(" -> ".join(plan))
-        for name, p in poses.items():
-            print(f"  {name}: " + ", ".join(f"{k} {v:.2f}" for k, v in p.items()))
         return 0
 
     from viam.components.arm import Arm
@@ -177,7 +124,7 @@ def main(argv=None) -> int:
     try:
         code, msg = play(conn, arm, plan, pts,
                          on_step=lambda s: print(f"STEP {tag}{s}", flush=True),
-                         log=lambda m: print(m, flush=True), poses=poses)
+                         log=lambda m: print(m, flush=True))
         if code or args.no_park:
             print(msg if code else f"done: {args.times} page(s), ended at 0", flush=True)
         return code

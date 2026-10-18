@@ -152,7 +152,7 @@
 <body>
 <div id="stale" hidden style="background:var(--warn);color:#111;padding:8px 16px;font-weight:600">
   The GUI server was started before the code changed, so new buttons will not work. Stop it (Ctrl+C in its terminal) and start it again:
-  <code>python -m bookworm gui</code></div>
+  <code>python -m bookworm.gui</code></div>
 <header>
   <h1><span class="worm" aria-hidden="true"><i></i><i></i><i></i><b></b></span>Bookworm <small>workshop</small></h1>
   <div class="tabs"><button id="tb-setup" class="on">Setup</button><button id="tb-monitor">Monitor</button></div>
@@ -379,7 +379,7 @@ const post = (url, body = {}) => fetch(url, {
 }).then(async r => {
   const j = await r.json().catch(() => null);
   if (j) return j;
-  if (r.status === 404) return {error: `the GUI server does not know ${url} - it is older than this page. Restart it: python -m bookworm gui`};
+  if (r.status === 404) return {error: `the GUI server does not know ${url} - it is older than this page. Restart it: python -m bookworm.gui`};
   return {error: `the GUI server answered ${r.status} ${r.statusText} for ${url}`};
 }).catch(e => ({error: "cannot reach the GUI server (" + e + ") - is it still running?"}));
 const getj = url => fetch(url).then(r => r.json());

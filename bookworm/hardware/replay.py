@@ -14,7 +14,7 @@ import cv2
 import numpy as np
 
 from .base import CameraGeometry
-from .mock import MockRobot
+from .workshop import WorkshopMock
 
 
 def save_view(root: Path, frame: np.ndarray, depth: np.ndarray, geom: CameraGeometry, pose: dict | None) -> Path:
@@ -30,7 +30,7 @@ def save_view(root: Path, frame: np.ndarray, depth: np.ndarray, geom: CameraGeom
     return d
 
 
-class ReplayRobot(MockRobot):
+class ReplayRobot(WorkshopMock):
     replay = True
 
     def __init__(self, folder: str | Path, home_pose: dict | None = None, home_joints=None):

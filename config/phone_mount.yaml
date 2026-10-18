@@ -26,7 +26,6 @@ ui:
   # robot connection (no new dial per page). v2 = flip_path_v2 (2026-10-17).
   # To revert to the original path, set v1 and restart the control page.
   flip_path: v2
-  flip_dynamic: true        # follow the book (falls back to the recorded joints until a reference is set)
 
 speech:
   elevenlabs:

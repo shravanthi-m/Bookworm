@@ -6,7 +6,7 @@ import pytest
 import yaml
 
 from bookworm.gui import server
-from bookworm.hardware import MockRobot
+from bookworm.hardware.workshop import WorkshopMock as MockRobot
 
 HOME = {"x": 390.0, "y": -57.0, "z": 480.0, "o_x": 0.0, "o_y": 0.0, "o_z": -1.0, "theta": -5.6}
 

@@ -17,7 +17,7 @@ import cv2
 import numpy as np
 
 from .base import CameraGeometry
-from .mock import MockRobot
+from .workshop import WorkshopMock
 
 # measured on the rig (data/calibration/20261016_184629, config/local.yaml)
 HOME = {"x": 389.667, "y": -56.869, "z": 480.904, "o_x": 0.0, "o_y": 0.0, "o_z": -1.0, "theta": -5.636}
@@ -32,7 +32,7 @@ CORNERS = {"tl": (530.0, 21.8), "tr": (497.1, -213.2), "br": (326.2, -180.7), "b
 SIZE = (1280, 720)
 
 
-class SimRobot(MockRobot):
+class SimRobot(WorkshopMock):
     """``table_z`` is the truth the table-height stage should find (the table top's z in the arm frame)."""
 
     sim = True
