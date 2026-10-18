@@ -124,8 +124,10 @@ def auto_targets(img: np.ndarray) -> dict | None:
         x, y, w, h, area = stats[i]
         if area < 0.04 * H * W:
             continue
-        if x <= 2 or y <= 2 or x + w >= W - 2 or y + h >= H - 2:          # touches the border: sweater, gripper, etc.
-            continue
+        if x <= 2 or y <= 2 or x + w >= W - 2 or y + h >= H - 2:          # at the border: sweater, gripper, etc....
+            b = labels == i
+            if int(b[0].sum() + b[-1].sum() + b[:, 0].sum() + b[:, -1].sum()) > 60:   # ...unless it only grazes it
+                continue
         if area > best_score:
             best, best_score = i, area
     if best is None:

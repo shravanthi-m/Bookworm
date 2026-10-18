@@ -1,13 +1,14 @@
-"""The book in the arm's space: the depth map's page heights, lifted to arm z by the z link, corrected by every place the tip
-has actually touched the page.
+"""The book in the arm's space, driven by where the tip has actually touched it.
 
-    page z (arm frame) at map (x, y) = depth height above the table + the table's z + correction(x, y)
+    page z (arm frame) at map (x, y) = level(x, y), inside the book outline; the table's z outside it
 
-The correction comes from the touches: each touch gives a residual (touched z - what the depth map says there).
-  * no page touch    -> no correction
+``level`` is fitted to the page touches (their touched z, pressure contacts):
   * 1-2 page touches -> their mean, as a constant over the book
   * 3+ page touches  -> a plane a + b*x + c*y through them (only when they are spread out in both x and y)
-The table touch is not a page touch: it defines the table's z, so its residual is zero by construction.
+The depth map is only a reference: it supplies the book outline, and each touch records what the depth map said there (so the
+disagreement is visible) but never moves the model. With no page touch at all the model falls back to the depth map
+(``driven`` = "depth").
+The table touch is not a page touch: it defines the table's z.
 
 x, y are in the depth map's (camera's) coordinates. The arm lands at (x, y) - xy_offset (kept in the file).
 
@@ -34,24 +35,24 @@ def _median_at(xs, ys, z, x, y, r=1, min_n=3):
     return float(np.median(p)) if p.size >= min_n else None
 
 
-def fit_correction(touches: list[dict]) -> dict:
-    """Correction from the page touches' residuals: {kind: none|constant|plane, a, b, c, n, rms_before, rms_after}."""
-    pts = [t for t in touches if t.get("kind") in PAGE_KINDS and t.get("residual") is not None]
+def fit_level(touches: list[dict]) -> dict:
+    """The page level from the page touches' z: {kind: none|constant|plane, a, b, c, n, spread, rms_after}; z = a + b*x + c*y."""
+    pts = [t for t in touches if t.get("kind") in PAGE_KINDS]
     if not pts:
         return {"kind": "none", "a": 0.0, "b": 0.0, "c": 0.0, "n": 0}
     x = np.array([t["x"] for t in pts], float)
     y = np.array([t["y"] for t in pts], float)
-    r = np.array([t["residual"] for t in pts], float)
-    out = {"kind": "constant", "a": float(r.mean()), "b": 0.0, "c": 0.0, "n": len(pts)}
+    z = np.array([t["z"] for t in pts], float)
+    out = {"kind": "constant", "a": float(z.mean()), "b": 0.0, "c": 0.0, "n": len(pts)}
     if len(pts) >= 3:
         A = np.c_[np.ones_like(x), x - x.mean(), y - y.mean()]
         sv = np.linalg.svd(A[:, 1:], compute_uv=False)
         if sv.min() / np.sqrt(len(pts)) > 20.0:                     # spread at least ~20 mm across both directions
-            a, b, c = np.linalg.lstsq(A, r, rcond=None)[0]
+            a, b, c = np.linalg.lstsq(A, z, rcond=None)[0]
             out = {"kind": "plane", "a": float(a - b * x.mean() - c * y.mean()), "b": float(b), "c": float(c), "n": len(pts)}
     fit = out["a"] + out["b"] * x + out["c"] * y
-    out["rms_before"] = round(float(np.sqrt(np.mean(r ** 2))), 2)
-    out["rms_after"] = round(float(np.sqrt(np.mean((r - fit) ** 2))), 2)
+    out["spread"] = round(float(np.sqrt(np.mean((z - z.mean()) ** 2))), 2)
+    out["rms_after"] = round(float(np.sqrt(np.mean((z - fit) ** 2))), 2)
     return out
 
 
@@ -76,17 +77,19 @@ def build(res: dict, table_z: float, touches: list[dict], *, points: dict | None
     xs, ys, h, bk = res["x"], res["y"], res["z"], res["book"].astype(bool)
     tt = []
     for t in touches:
-        d = _median_at(xs, ys, h, t["x"], t["y"], r=1, min_n=3)       # the same window z_at reads
-        exp = None if d is None else d + table_z
-        tt.append({**t, "depth_z": None if exp is None else round(exp, 2),
-                   "residual": None if exp is None or t["kind"] == "table" else round(float(t["z"]) - exp, 2)})
-    corr = fit_correction(tt)
+        d = _median_at(xs, ys, h, t["x"], t["y"], r=1, min_n=3)       # what the depth map says there (reference only)
+        ref = None if d is None else d + table_z
+        tt.append({**t, "depth_z": None if ref is None else round(ref, 2),
+                   "depth_off": None if ref is None or t["kind"] == "table" else round(float(t["z"]) - ref, 2)})
+    lvl = fit_level(tt)
     X, Y = np.meshgrid(xs, ys, indexing="ij")
-    cgrid = corr["a"] + corr["b"] * X + corr["c"] * Y
-    z_arm = h + table_z + np.where(bk, cgrid, 0.0)                 # the table stays where the table touch put it
+    if lvl["kind"] == "none":                                         # no touch on the page yet: the depth map, as measured
+        z_arm, driven = h + table_z, "depth"
+    else:
+        z_arm, driven = np.where(bk, lvl["a"] + lvl["b"] * X + lvl["c"] * Y, table_z), "touch"
     for t in tt:
-        if t["residual"] is not None:
-            t["after"] = round(t["residual"] - (corr["a"] + corr["b"] * t["x"] + corr["c"] * t["y"]), 2)
+        if t["kind"] in PAGE_KINDS and lvl["kind"] != "none":
+            t["after"] = round(float(t["z"]) - (lvl["a"] + lvl["b"] * t["x"] + lvl["c"] * t["y"]), 2)
     pages = {}
     if points and "cl" in points and "cr" in points:              # split the book at the line half way between the centres
         cl, cr = np.array(points["cl"][:2], float), np.array(points["cr"][:2], float)
@@ -98,7 +101,7 @@ def build(res: dict, table_z: float, touches: list[dict], *, points: dict | None
                 pages[name] = pl
     whole = fit_plane(X[bk], Y[bk], z_arm[bk])
     return {"version": 1, "built": time.strftime("%Y-%m-%d %H:%M:%S"), "frame": "arm world, mm; x, y in depth-map coordinates",
-            "table_z": round(float(table_z), 2), "correction": corr, "touches": tt, "points": points or {},
+            "driven": driven, "table_z": round(float(table_z), 2), "level": lvl, "touches": tt, "points": points or {},
             "pages": pages, "book_plane": whole, **(meta or {}),
             "grid": {"x": xs, "y": ys, "z_arm": z_arm, "height": h, "book": bk}}
 

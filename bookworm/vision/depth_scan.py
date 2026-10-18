@@ -42,10 +42,16 @@ def table_plane(depth, color, geom, step: int = 2):
     W = world_heights(depth, geom, step)
     wm = wood_mask(color)[::step, ::step] & np.isfinite(W[..., 2])
     pts = W[wm]
-    if len(pts) < 500:
-        raise ValueError("too few table pixels to fit the table plane")
-    a, b, c = fit_plane(pts)
-    return float(a), float(b), float(c), int(wm.sum())
+    # robust: wood-coloured things off the table (a shoe on the floor 1.2 m down) must not tilt the plane. Start from
+    # the points near the median height, then refit twice keeping only points within 10 mm of the plane.
+    pts = pts[np.abs(pts[:, 2] - np.median(pts[:, 2])) < 60]
+    for _ in range(3):
+        if len(pts) < 500:
+            raise ValueError("too few table pixels to fit the table plane")
+        a, b, c = fit_plane(pts)
+        keep = np.abs(pts[:, 2] - (a + b * pts[:, 0] + c * pts[:, 1])) < 10
+        pts = pts[keep]
+    return float(a), float(b), float(c), int(len(pts))
 
 
 def tilt_deg(b: float, c: float) -> float:

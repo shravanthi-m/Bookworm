@@ -46,9 +46,10 @@ STEP_MM = 2.0              # ladder step
 DEMO_FROM_MM = 16.0        # the demo ladder starts this far above the expected page (8 steps of trend before it)
 TRAVEL_MM = 30.0           # travel between demo points this far above the highest of them
 CORNER_INSET_MM = 15.0     # demo corners are touched this far in from the corner (the depth map is blank at the edge)
-DEMO_ORDER = ["tbl", "tl", "tr", "cr", "br", "bl", "cl"]   # tbl: bare table far from the book, first
-MARK_ORDER = ["tl", "tr", "br", "bl", "cl", "cr"]          # XY marking calibration: the four corners, then both centres
-MARK_HOVER_MM = 3.0        # marking: the tip stops this far above the page so a pen can mark under it
+DEMO_ORDER = ["tl", "tr", "cr", "br", "bl", "cl"]            # book points only (no table touch in the demo)
+PAGE_SEARCH_MM = 60.0       # the Z link's page touch searches from this far above the table (a thick book) down, by the load alone
+DEMO_UNITS = 3             # default units (2 mm steps) above the book for a demo touch: 3 light-touched perfectly in the XY test
+MARK_ORDER = ["tl", "tr", "br", "bl", "cl", "cr"]          # the order the touched points are listed in for marking
 
 
 class State:
@@ -84,6 +85,10 @@ class StageFail(Exception):
     pass
 
 
+class PlannerRefused(StageFail):
+    """The motion planner found no way to make a move (nothing moved)."""
+
+
 def create_app(robot, cfg: dict | None = None) -> Flask:
     import numpy as np
 
@@ -92,7 +97,7 @@ def create_app(robot, cfg: dict | None = None) -> Flask:
     from . import book_model as bmod
     from .book import KEYS, LABEL, Book, auto_targets
 
-    DEMO_LABEL = {**LABEL, "tbl": "Bare table (far from the book)"}
+    DEMO_LABEL = dict(LABEL)
 
     started_build = code_build()
     robot_mode = "sim" if getattr(robot, "sim", False) else "replay" if getattr(robot, "replay", False) else "real"
@@ -282,10 +287,24 @@ def create_app(robot, cfg: dict | None = None) -> Flask:
         """From low over the book: straight up to home height first (a joint move from low can swing the tip down), then home."""
         hp = home_pose()
         now = robot.end_pose()
-        if hp and now["z"] < hp["z"] - 5:
-            up = dict(now, z=float(hp["z"]))
-            if in_limits(up) is None:
-                slow_block(lambda: robot.move_to(up))
+        # up to half the home height only (the planner accepts that); home itself is a joint move, which needs no planning
+        if hp and now["z"] < hp["z"] / 2.0 - 5:
+            target = float(hp["z"]) / 2.0
+            lifted = False
+            for hop in (None, 40.0, 20.0):                         # one move; if the planner refuses, hops of 40, then 20 mm
+                try:
+                    while robot.end_pose()["z"] < target - 1.0:
+                        z = target if hop is None else min(target, robot.end_pose()["z"] + hop)
+                        up = dict(robot.end_pose(), z=z)
+                        if in_limits(up) is not None:
+                            break
+                        slow_block(lambda: guarded_move(up, "lift before home"))
+                    lifted = robot.end_pose()["z"] >= target - 1.0
+                    break
+                except PlannerRefused:
+                    st.say("lift before home: refused" + (", trying shorter hops" if hop != 20.0 else ""))
+            if not lifted:
+                st.say("lift before home: could not lift in a straight line - going home with a slow joint move from here")
         go_home_blocking()
 
     def ensure_home():
@@ -386,9 +405,8 @@ def create_app(robot, cfg: dict | None = None) -> Flask:
             return None
         rec = {"table_slope": [round(b, 5), round(c, 5)], "table_tilt_deg": round(tilt_deg(b, c), 2), "wood_px": n,
                "fitted": time.strftime("%Y-%m-%d %H:%M:%S")}
-        save_depth_cfg(rec)
-        st.say(f"home level: table plane tilts {rec['table_tilt_deg']} deg in the depth data ({n} wood pixels) - saved")
-        return rec
+        st.say(f"home level: table plane tilts {rec['table_tilt_deg']} deg in the depth data ({n} table pixels)")
+        return rec                                                   # saved by the stage only if it passes
 
     def grab_view():
         frame = robot.capture()
@@ -431,28 +449,40 @@ def create_app(robot, cfg: dict | None = None) -> Flask:
             st.say(f"depth scan: could not save ({e})")
 
     def scan_pass_blocking():
-        """The camera visits spots around home at home height (never lower), a depth view at each; back home; fuse."""
+        """The camera visits spots around the BOOK's midpoint (from the first capture; home if there is none yet) at home
+        height (never lower), a depth view at each; back home; fuse."""
         hp, joints = home_pose(), st.cfg.get("home_joints")
-        offsets = depth_cfg().get("pass_offsets_mm") or [[0, 0], [80, 0], [0, 80], [0, -80], [80, 70], [80, -70]]
+        offsets = depth_cfg().get("pass_offsets_mm") or [[0, 0], [70, 0], [-70, 0], [0, 80], [0, -80]]
+        cx, cy = 0.0, 0.0                                             # flange shift that puts the camera's centre over the book
+        mid, g = book.centre(), robot.camera_geometry()
+        if mid is not None and g is not None:
+            seen = book.pixel_world([float(g.K[0, 2]), float(g.K[1, 2])], g)[:2]   # what the image centre looks at now
+            cx, cy = float(mid[0] - seen[0]), float(mid[1] - seen[1])
+            if np.hypot(cx, cy) > 200:
+                st.say(f"depth scan: the book midpoint is {np.hypot(cx, cy):.0f} mm from the view centre - scanning around home")
+                cx, cy = 0.0, 0.0
+            else:
+                st.say(f"depth scan: views centred on the book midpoint ({mid[0]:.0f}, {mid[1]:.0f}): shift {cx:+.0f}, {cy:+.0f} mm")
         views = []
         try:
             for dx, dy in offsets:
                 if st.estop:
                     st.say("depth scan: stopped")
                     break
-                if (dx, dy) != (0, 0):
+                dx, dy = dx + cx, dy + cy
+                if abs(dx) > 0.5 or abs(dy) > 0.5:
                     tgt = {kk: float(hp[kk]) for kk in ("x", "y", "z", "o_x", "o_y", "o_z", "theta")}
                     tgt["x"] += dx
                     tgt["y"] += dy
                     if (why := in_limits(tgt)) is not None:
-                        dsc["skipped"].append(f"({dx}, {dy}): {why}")
+                        dsc["skipped"].append(f"({dx:.0f}, {dy:.0f}): {why}")
                         continue
                     try:
                         robot.move_to(tgt)
                     except Exception as e:  # noqa: BLE001
                         if "IK solutions" in str(e) or "constraint" in str(e):    # the planner said no: skip this view
-                            dsc["skipped"].append(f"({dx}, {dy}): planner refused")
-                            st.say(f"depth scan: view ({dx}, {dy}) refused by the planner, skipped")
+                            dsc["skipped"].append(f"({dx:.0f}, {dy:.0f}): planner refused")
+                            st.say(f"depth scan: view ({dx:.0f}, {dy:.0f}) refused by the planner, skipped")
                             continue
                         raise
                     time.sleep(0.8)
@@ -485,6 +515,36 @@ def create_app(robot, cfg: dict | None = None) -> Flask:
             st.say(f"touch: no joint load reading ({e}); position only")
             return None
 
+    def is_collision(e) -> bool:
+        """The xArm's own collision stop (collision_sensitivity > 0): 'collision caused overcurrent'."""
+        m = str(e).lower()
+        return "collision" in m and "overcurrent" in m
+
+    def is_refusal(e) -> bool:
+        """The Viam motion planner refusing a move (no IK solution inside its constraints). The arm did not move and
+        nothing needs clearing; the same move will be refused again, so it is not retried."""
+        m = str(e)
+        return "IK solutions" in m or "constraint" in m.lower()
+
+    def guarded_move(ps, what):
+        """A move outside a touch step. The arm's collision stop: clear it and try once more. The planner refusing:
+        raise PlannerRefused at once (callers choose another route)."""
+        for attempt in (1, 2):
+            try:
+                robot.move_to(ps)
+                return
+            except Exception as e:  # noqa: BLE001
+                if is_collision(e):
+                    robot.clear_error()
+                    st.say(f"{what}: the arm's collision stop fired; error cleared" + (", trying once more" if attempt == 1 else ""))
+                    time.sleep(0.5)
+                elif is_refusal(e):
+                    st.say(f"{what}: the motion planner refused this move: {str(e)[:500]}")
+                    raise PlannerRefused(f"{what}: the motion planner refused this move") from e
+                else:
+                    raise
+        raise StageFail(f"{what}: the arm's collision stop fired twice - the error is cleared and the arm left where it stopped")
+
     def ladder(key, label, x, y, zs, *, press=False, photos="each", lo=0.0, hi=1.0, stage="zlink"):
         """Lower the tip over (x, y) through the tip heights ``zs`` (highest first), one step at a time, slowly.
 
@@ -511,18 +571,18 @@ def create_app(robot, cfg: dict | None = None) -> Flask:
 
         def back_off(i):
             """Contact at step i: straight back to step i - 1; still loaded there -> out to the start height and home."""
-            robot.move_to(poses[max(i - 1, 0)])
+            guarded_move(poses[max(i - 1, 0)], f"{label}: backing off")
             time.sleep(float(depth_cfg().get("height_settle_s", 0.4)))
             ld = read_load(sd, missing)
             score = None if ld is None else sd.load_score(ld)
             if score is not None and score > sd.load_k:
                 st.say(f"{label}: the load is still {score:.0f} std devs off its trend after backing up - backing out to home")
-                robot.move_to(poses[0])
+                guarded_move(poses[0], f"{label}: backing out")
                 hp = home_pose()
                 if hp:
                     up = dict(robot.end_pose(), z=float(hp["z"]))
                     if in_limits(up) is None:
-                        robot.move_to(up)
+                        guarded_move(up, f"{label}: backing out")
                 if st.cfg.get("home_joints"):
                     robot.move_joints(st.cfg["home_joints"])
                 out["retreat"] = "home"
@@ -547,8 +607,7 @@ def create_app(robot, cfg: dict | None = None) -> Flask:
                     try:
                         robot.move_to(ps)
                     except Exception as e:  # noqa: BLE001
-                        m = str(e).lower()
-                        if not (i >= 1 and "collision" in m and "overcurrent" in m):
+                        if not is_collision(e):
                             raise
                         robot.clear_error()                         # the arm's own collision stop (sensitivity > 0)
                         out.update(tip_z=float(tip_of(robot.end_pose(), L)[2]), how="fault", step=i)
@@ -581,7 +640,7 @@ def create_app(robot, cfg: dict | None = None) -> Flask:
                 if cam is not None:
                     cam.__exit__(None, None, None)
                 if out["retreat"] != "home":
-                    robot.move_to(poses[0])                         # back up to the start height
+                    guarded_move(poses[0], f"{label}: back up")    # back up to the start height
 
         try:
             slow_block(descend)
@@ -603,7 +662,7 @@ def create_app(robot, cfg: dict | None = None) -> Flask:
 
     # ---- setup flow ------------------------------------------------------------------------------------------
     STAGES = [("level", "Home & level"), ("capture", "First capture"), ("depth", "Depth scan"),
-              ("zlink", "Z link"), ("model", "Book model"), ("xycal", "XY marking"), ("demo", "Touch demo")]
+              ("zlink", "Z link"), ("model", "Book model"), ("xycal", "Touch calibration"), ("demo", "Touch demo")]
     DEPENDS = {"level": ["depth", "zlink", "model", "demo"], "capture": ["model", "xycal", "demo"], "depth": ["zlink", "model", "demo"],
                "zlink": ["model", "demo"], "model": ["demo"]}
     MANUAL = ("xycal",)                                            # needs a person at every point: never part of Run all
@@ -647,7 +706,8 @@ def create_app(robot, cfg: dict | None = None) -> Flask:
         tool_deg = float(np.degrees(np.arccos(min(1.0, -float(ov[2]) / float(np.linalg.norm(ov))))))
         tilt = rec["table_tilt_deg"]
         data = {"table_tilt_deg": tilt, "camera_vs_table_deg": round(cam_deg, 2), "tool_off_vertical_deg": round(tool_deg, 2)}
-        save_depth_cfg({"camera_vs_table_deg": data["camera_vs_table_deg"]})
+        if tilt <= 8.0:                                              # a bad fit must not level every later depth view
+            save_depth_cfg({**rec, "camera_vs_table_deg": data["camera_vs_table_deg"]})
         if tilt <= 1.0 and cam_deg <= 1.0:
             return "ok", f"home is parallel to the table (table {tilt} deg off, camera {cam_deg:.1f} deg off)", data
         if tilt <= 8.0:
@@ -700,37 +760,28 @@ def create_app(robot, cfg: dict | None = None) -> Flask:
         (dd / f"{stamp}.json").write_text(json.dumps(rec, indent=1), encoding="utf-8")
 
     def stage_zlink(o):
-        """Table touch -> the table's z in the arm frame; page touch -> a check of the depth heights against it."""
-        if dsc["res"] is None:
-            raise StageFail("run the depth scan first - heights above the table come from it")
-        if "bl" not in book.px:
-            raise StageFail("run the first capture first - the bottom-left corner (BL) is the page-check point")
+        """Table touch -> the table's z in the arm frame; then a page touch at the left-page centre -> the book's height.
+        Both are found by the joint load alone: no depth map needed, and the page search covers a whole book's thickness."""
+        if "cl" not in book.px:
+            raise StageFail("run the first capture first - the left-page centre (CL) is the page-check point")
         d, L = depth_cfg(), tool_len()
         if table_measured() and not o.get("force") and d.get("z_link_tool_length_mm") == L:
             set_progress("zlink", 1.0, "using the saved value")
             return "ok", (f"using the saved z link: the table is {table_z():g} mm in the arm frame (measured {d['table_height_fitted']} "
                           f"with the {L:g} mm tool)"), {"saved": True}
         ensure_home()
-        fn = surface_fn()
-        # BL, moved in off the corner: twice the demo's inset, so the depth reading there is page only (15 mm in from a
-        # corner the 3x3-cell median still mixes in the edge, and one bad page check would shift the whole book model)
-        wx, wy = book.demo_xy("bl", 2 * CORNER_INSET_MM)
-        h_now = None if fn is None else fn(wx, wy)
-        if h_now is None:
-            raise StageFail("the depth map has no reading at the bottom-left corner (BL)")
-        h_above = h_now - table_z()                                   # page height above the table there (offset-free)
+        wx, wy = book.demo_xy("cl", 0)                                # the left-page centre (the BL route was refused by the planner)
         lock = d.get("z_link_spot_lock")
         if lock:
-            h_l = table_h_at(float(lock[0]), float(lock[1]))
-            if h_l is not None and abs(h_l) > 3.0:
-                raise StageFail(f"the locked table spot ({lock[0]:.0f}, {lock[1]:.0f}) is not bare table in the depth map "
-                                f"({h_l:.1f} mm above it) - unlock it or lock a clear spot")
-            spots = [(float(lock[0]), float(lock[1]), 0.0 if h_l is None else h_l)]
+            spot = (float(lock[0]), float(lock[1]))
         else:
-            spots = bare_table_spots(float(d.get("z_link_book_clear_mm", 80)), far=True)
-            if not spots:
-                raise StageFail("no bare table in the depth map 80 mm clear of the book - jog the arm over a clear spot and press "
-                                "'Lock the arm's spot'")
+            ap = apex_table_spot()
+            if ap is None:
+                raise StageFail("run the first capture first - the table point is worked out from the TL and BL corners")
+            spot = (ap[0], ap[1])
+        if dsc["res"] is not None and (h_t := table_h_at(spot[0], spot[1])) is not None and abs(h_t) > 3.0:
+            raise StageFail(f"the table point ({spot[0]:.0f}, {spot[1]:.0f}) is not bare table in the depth map ({h_t:.1f} mm "
+                            "above it) - clear it, or jog over a clear spot and press 'Lock the arm's spot'")
         expected = table_z() if table_measured() else float(gui_cfg().get("tip_min_z_mm", 25))
         below = float(d.get("z_link_search_below_mm", 10))
         top, bottom = expected + 22.0, expected - below
@@ -739,14 +790,9 @@ def create_app(robot, cfg: dict | None = None) -> Flask:
             # moves by the difference in tip z). Search across both.
             moved = expected + float(d["z_link_tool_length_mm"]) - L
             top, bottom = max(top, moved + 22.0), min(bottom, moved - below)
-        spot = None
-        for x, y, h_t in spots:
-            ends = [flange_for_tip([x, y, z], robot.end_pose(), L) for z in (top, bottom - 0.5)]
-            if all(in_limits(ps, bottom - 1.0) is None for ps in ends):
-                spot = (x, y, h_t)
-                break
-        if spot is None:
-            raise StageFail("the locked table spot is outside the arm's limits" if lock else "no bare-table spot clear of the book is in reach")
+        ends = [flange_for_tip([spot[0], spot[1], z], robot.end_pose(), L) for z in (top, bottom - 0.5)]
+        if not all(in_limits(ps, bottom - 1.0) is None for ps in ends):
+            raise StageFail("the table spot is outside the arm's limits")
         live["traces"], live["expected"] = {}, {}
         stamp = time.strftime("%Y%m%d_%H%M%S")
         zs = [float(z) for z in np.arange(top, bottom - 1e-6, -STEP_MM)]
@@ -756,36 +802,36 @@ def create_app(robot, cfg: dict | None = None) -> Flask:
             save_zlink_trace(stamp, {"result": "no contact"})
             raise StageFail(f"no contact with the table down to tip z {zs[-1]:.0f} mm. If the table is lower than {expected:.0f} mm in the "
                             "arm frame, raise gui.depth.z_link_search_below_mm and run it again")
-        new_off = round(r["tip_z"] - spot[2], 1)
+        new_off = round(float(r["tip_z"]), 1)
         save_depth_cfg({"arm_offset_mm": new_off, "table_height_fitted": time.strftime("%Y-%m-%d %H:%M:%S"),
-                        "z_link_table_tip_z": round(r["tip_z"], 1), "z_link_tool_length_mm": L,
-                        "z_link_spot": [round(spot[0], 1), round(spot[1], 1)], "z_link_spot_lock": [round(spot[0], 1), round(spot[1], 1)],
-                        "z_link_page_tip_z": None, "z_link_page_xy": None})
+                        "z_link_table_tip_z": new_off, "z_link_tool_length_mm": L,
+                        "z_link_spot": [round(spot[0], 1), round(spot[1], 1)],     # not locked: it follows the book
+                        "z_link_page_tip_z": None, "z_link_page_xy": None, "z_link_page_at": None})
         drop_model()
         by = {"stall": "the tip stopped going down", "load": "the joint load jumped", "fault": "the arm's collision stop fired",
               "press": "you pressed"}[r["how"]]
         msg = f"the table is {new_off:g} mm in the arm frame (bare table at ({spot[0]:.0f}, {spot[1]:.0f}); {by})."
-        out = {"arm_offset_mm": new_off, "table_tip_z": round(r["tip_z"], 1), "table_found_by": r["how"], "spot": [round(spot[0]), round(spot[1])],
-               "page_above_table": round(h_above, 1), "retreat": r["retreat"]}
+        out = {"arm_offset_mm": new_off, "table_tip_z": new_off, "table_found_by": r["how"], "spot": [round(spot[0]), round(spot[1])],
+               "retreat": r["retreat"]}
         if r["retreat"] == "home":
             save_zlink_trace(stamp, out)
-            return "warn", msg + " The load stayed high after backing up, so the arm went home; the page check was not done.", out
-        exp_p = new_off + h_above
-        zp = [float(z) for z in np.arange(exp_p + 22.0, exp_p - 6.0 - 1e-6, -STEP_MM)]
-        travel_above(wx, wy, exp_p + 22.0 + TRAVEL_MM)               # up off the table, across above the book, down over BL
-        rp = ladder("page", "bottom-left page (BL)", wx, wy, zp, press=True, lo=0.5, hi=1.0)
+            return "warn", msg + " The load stayed high after backing up, so the arm went home; the page touch was not done.", out
+        # the book: from PAGE_SEARCH_MM above the table (a thick book) down to 3 mm above it, by the load alone
+        zp = [float(z) for z in np.arange(new_off + PAGE_SEARCH_MM, new_off + 3.0 - 1e-6, -STEP_MM)]
+        travel_above(wx, wy, zp[0] + TRAVEL_MM)                      # up off the table, across above the book, down over CL
+        rp = ladder("page", "left page centre (CL)", wx, wy, zp, press=True, lo=0.5, hi=1.0)
+        if rp["retreat"] != "home":
+            lift_then_home()                                         # never leave the tip sitting just above the book
         if rp["tip_z"] is None or rp["how"] == "bottom":
             save_zlink_trace(stamp, out)
-            return "ok", msg + " Page check: no contact found (paper gives way); the table touch is used.", out
-        delta = round((rp["tip_z"] - h_above) - new_off, 1)
-        out.update(page_tip_z=round(rp["tip_z"], 1), page_check_mm=delta, page_found_by=rp["how"])
-        save_depth_cfg({"z_link_page_check_mm": delta, "z_link_page_tip_z": round(rp["tip_z"], 1),
-                        "z_link_page_xy": [round(wx, 1), round(wy, 1)]})          # a page touch for the book model
+            return "warn", (msg + f" Page touch: no contact between {zp[0]:.0f} and {zp[-1]:.0f} mm over the left-page centre - is "
+                            "the book under that point? The book height is not measured."), out
+        page_z = round(float(rp["tip_z"]), 1)
+        out.update(page_tip_z=page_z, page_above_table=round(page_z - new_off, 1), page_found_by=rp["how"])
+        save_depth_cfg({"z_link_page_tip_z": page_z, "z_link_page_xy": [round(wx, 1), round(wy, 1)],     # a page touch for the
+                        "z_link_page_at": time.strftime("%Y-%m-%d %H:%M:%S")})                          # book model, for this book position
         save_zlink_trace(stamp, out)
-        if abs(delta) > 3.0:
-            return "warn", (msg + f" The page check disagrees by {delta:+.1f} mm: the depth height of the page is off by about that "
-                            "much, or the page contact was early or late. The table touch is used."), out
-        return "ok", msg + f" Page check agrees ({delta:+.1f} mm).", out
+        return "ok", msg + f" The book at the left-page centre is at z {page_z:g} mm, {page_z - new_off:.1f} mm above the table.", out
 
     def model_touches():
         """The touches the z link made: the table (sets the table's z) and the left-page check (a page touch)."""
@@ -794,9 +840,18 @@ def create_app(robot, cfg: dict | None = None) -> Flask:
         if d.get("z_link_table_tip_z") is not None and d.get("z_link_spot"):
             sx, sy = d["z_link_spot"]
             out.append({"key": "table", "kind": "table", "x": float(sx), "y": float(sy), "z": float(d["z_link_table_tip_z"])})
-        if d.get("z_link_page_tip_z") is not None and d.get("z_link_page_xy"):
+        fresh = bool(d.get("z_link_page_at")) and bool(book.taken_at) and str(d["z_link_page_at"]) >= str(book.taken_at)
+        if not fresh and d.get("z_link_page_tip_z") is not None:     # touched before this capture: the book may have moved
+            st.say("book model: the saved page check is older than the first capture - not used (run the Z link to redo it)")
+        if fresh and d.get("z_link_page_tip_z") is not None and d.get("z_link_page_xy"):
             px, py = d["z_link_page_xy"]
-            out.append({"key": "bl", "kind": "page_check", "x": float(px), "y": float(py), "z": float(d["z_link_page_tip_z"])})
+            out.append({"key": "cl", "kind": "page_check", "x": float(px), "y": float(py), "z": float(d["z_link_page_tip_z"])})
+        tc = d.get("touchcal") or {}
+        if tc.get("at") and book.taken_at and str(tc["at"]) >= str(book.taken_at):   # touch calibration on this book position:
+            for k, p in (tc.get("points") or {}).items():                            # only touches that MET the page (higher
+                if p.get("contact_z") is not None:                                    # than the Z link height) are measurements
+                    out.append({"key": k, "kind": "page_check", "x": float(p["xy"][0]), "y": float(p["xy"][1]),
+                                "z": float(p["contact_z"])})
         return out
 
     def make_model(touches, version, stamp=None):
@@ -820,91 +875,127 @@ def create_app(robot, cfg: dict | None = None) -> Flask:
             raise StageFail("run the depth scan first")
         if not table_measured():
             raise StageFail("run the z link first - without it depth heights can't be turned into arm z")
-        set_progress("model", 0.5, "merging the depth map with the touches")
+        set_progress("model", 0.5, "building the model from the touches")
         m = make_model(model_touches(), 1)
-        c = m["correction"]
-        msg = {"none": "no page touch yet: the depth map is used as measured",
-               "constant": f"all page heights shifted {c['a']:+.1f} mm to match {c['n']} page touch(es)",
-               "plane": f"page heights corrected by a plane through {c['n']} page touches"}[c["kind"]]
-        pg = ", ".join(f"{k} page {v['z_mid']:.1f} mm, tilted {v['tilt_deg']:.1f} deg, {v['rms_mm']:.1f} mm from flat"
-                       for k, v in m["pages"].items())
-        return "ok", f"{msg}. {pg}. Saved to {Path(bm['dir']).relative_to(ROOT).as_posix()}", {"model": bmod.summary(m)}
+        c = m["level"]
+        if m["driven"] == "depth":
+            return "warn", ("no page touch on this book yet (run the Z link after the first capture): the depth map is used as "
+                            "measured, and it can be many mm off. Touch before relying on it."), {"model": bmod.summary(m)}
+        offs = [t["depth_off"] for t in m["touches"] if t["kind"] in bmod.PAGE_KINDS and t.get("depth_off") is not None]
+        msg = (f"driven by {c['n']} page touch(es): {'a plane' if c['kind'] == 'plane' else 'one level'} at {c['a']:.1f} mm"
+               + (f" (touches {c['rms_after']:.1f} mm rms from it)" if c["n"] > 1 else ""))
+        if offs:
+            msg += f"; the depth map (reference only) was {sum(offs) / len(offs):+.1f} mm off at the touches"
+        out = f"{msg}. Saved to {Path(bm['dir']).relative_to(ROOT).as_posix()}"
+        bad = []                                                     # every point must sit on believable page
+        for k in KEYS:
+            xy = book.demo_xy(k, CORNER_INSET_MM)
+            z = None if xy is None else bmod.z_at(m, xy[0], xy[1])
+            if z is None or z < table_z() + 3.0:
+                bad.append(f"{k} ({'outside the book outline' if z is None else f'{z:.1f}'})")
+        if bad:
+            return "warn", (out + f". CHECK: no book height at {', '.join(bad)} (table {table_z():g}): those points are outside "
+                            "the book outline in the depth map - look at the top-down view"), \
+                {"model": bmod.summary(m), "bad_points": bad}
+        return "ok", out, {"model": bmod.summary(m)}
 
-    def demo_table_spot():
-        """The demo's table point: the z link's locked spot, else the nearest bare table clear of the book."""
-        lock = depth_cfg().get("z_link_spot_lock")
-        if lock:
-            return [float(lock[0]), float(lock[1])]
-        spots = bare_table_spots(float(depth_cfg().get("z_link_book_clear_mm", 80)), far=True) if dsc["res"] is not None else []
-        return [round(spots[0][0], 1), round(spots[0][1], 1)] if spots else None
+    def apex_table_spot():
+        """The table touch point: off the book's TL-BL edge, where lines from TL and BL meet at a right angle (on the
+        side away from the book): half the edge's length out from its middle."""
+        a, b, c = book.world3("tl"), book.world3("bl"), book.centre()
+        if a is None or b is None or c is None:
+            return None
+        a, b = np.array(a[:2], float), np.array(b[:2], float)
+        m, e = (a + b) / 2, b - a
+        n = np.array([-e[1], e[0]]) / np.linalg.norm(e)
+        if np.dot(n, m - c) < 0:                                     # point away from the book
+            n = -n
+        p = m + n * np.linalg.norm(e) / 2
+        return [round(float(p[0]), 1), round(float(p[1]), 1)]
 
     def travel_above(ax, ay, min_tip_z):
         """Between points: straight up to the travel height (half the home height, never lower than ``min_tip_z`` for the
         tip), across at that height, then straight down to it over (ax, ay) if coming from higher (home)."""
         L, now = tool_len(), robot.end_pose()
         hz = float(home_pose()["z"]) if home_pose() else now["z"]
-        travel = max(hz / 2.0, min_tip_z + L)                       # flange z
-        if now["z"] < travel - 1.0:
-            up = dict(now, z=travel)
-            if (why := in_limits(up)) is not None:
-                raise StageFail(f"travel height: {why}")
-            slow_block(lambda: robot.move_to(up))
-        across = flange_for_tip([ax, ay, max(travel, robot.end_pose()["z"]) - L], robot.end_pose(), L)
-        down = flange_for_tip([ax, ay, travel - L], robot.end_pose(), L)
-        for ps in (across, down):
+        travel = max(hz / 2.0, min_tip_z + L)                       # flange z: half the home height, or higher if needed
+        # go to exactly the travel height first (up from low, or straight down from home), then across, at that height
+        level = dict(now, z=travel)
+        across = flange_for_tip([ax, ay, travel - L], now, L)
+        for ps in (level, across):
             if (why := in_limits(ps)) is not None:
                 raise StageFail(f"travel: {why}")
-        slow_block(lambda: robot.move_to(across))
-        if across["z"] - down["z"] > 1.0:
-            slow_block(lambda: robot.move_to(down))
+        if abs(now["z"] - travel) > 1.0:
+            slow_block(lambda: guarded_move(level, "travel to the travel height"))
+        try:
+            slow_block(lambda: guarded_move(across, "travel across"))
+        except PlannerRefused:
+            # The planner could not reach this pose with the usual wrist angle (its message names the wrist-vs-camera box and
+            # the back wall). Turning the wrist about the vertical tool axis does not move the tip, but changes the arm's
+            # bend: try a few wrist angles.
+            for dth in (15.0, -15.0, 30.0, -30.0):
+                try:
+                    slow_block(lambda: guarded_move(dict(across, theta=across["theta"] + dth), "travel across"))
+                    st.say(f"travel: reached the point with the wrist turned {dth:+.0f} deg")
+                    return
+                except PlannerRefused:
+                    continue
+            raise
 
-    def demo_plan():
-        """For each point: where the tip goes (x, y, after the XY correction) and the page z there. Nothing moves."""
+    def demo_units(k, units=None):
+        """Units (2 mm steps) above the book height for a demo touch: the person's choice, else what the touch calibration
+        used for that point (it light-touched there), else DEMO_UNITS."""
+        if units and k in units:
+            return max(0, min(8, int(units[k])))
+        tc = depth_cfg().get("touchcal") or {}
+        if tc.get("at") and book.taken_at and str(tc["at"]) >= str(book.taken_at):
+            u = ((tc.get("points") or {}).get(k) or {}).get("units")
+            if u is not None:
+                return int(u)
+        return DEMO_UNITS
+
+    def demo_plan(keys=None, units=None):
+        """For each chosen book point: where the tip goes (x, y, after the XY correction) and the touch height: the book
+        model's height there (driven by the touches) plus ``units`` x 2 mm. Nothing moves."""
+        keys = [k for k in DEMO_ORDER if keys is None or k in keys]
         if bm["model"] is None:                                      # the demo touches where the book model puts the page
-            return [{"key": k, "skip": "no book model yet (stage 5)"} for k in DEMO_ORDER]
+            return [{"key": k, "skip": "no book model yet (stage 5)"} for k in keys]
         off = xy_offset() or [0.0, 0.0]
         m = bm["model"]
-        fn = lambda x, y: bmod.z_at(m, x, y)                        # noqa: E731
         plan = []
-        for k in DEMO_ORDER:
-            if k == "tbl":                                           # bare table far from the book, at the table's z
-                spot = demo_table_spot()
-                if spot is None:
-                    plan.append({"key": k, "skip": "no bare table spot clear of the book"})
-                else:                                                # the z link's spot: an arm position, no XY correction
-                    plan.append({"key": k, "xy": spot, "aim": spot, "z": round(table_z(), 1)})
-                continue
+        for k in keys:
             xy = book.demo_xy(k, CORNER_INSET_MM)
             if xy is None:
                 plan.append({"key": k, "skip": "no point"})
                 continue
             ax, ay = xy[0] - off[0], xy[1] - off[1]                   # aim so the arm LANDS on the point
-            # the page height of the point itself: the depth map is in the camera's coordinates, like the point, so the
-            # camera's own error (what the XY correction undoes for the arm) cancels out here
-            z = None if fn is None else fn(xy[0], xy[1])
-            if z is None:
-                plan.append({"key": k, "skip": "no depth reading there"})
+            page = bmod.z_at(m, xy[0], xy[1])                         # the model is in the camera's coordinates, like the point
+            if page is None:
+                plan.append({"key": k, "skip": "outside the book outline"})
                 continue
-            if z < tip_floor():
-                plan.append({"key": k, "skip": f"page z {z:.1f} is below the tip floor {tip_floor():g}"})
+            u = demo_units(k, units)
+            z = float(page) + u * STEP_MM
+            if page < table_z() + 3.0 or z < tip_floor():             # a page at or under the table: the model is wrong there
+                plan.append({"key": k, "skip": f"book height {page:.1f} is not believable (table {table_z():g})"})
                 continue
-            plan.append({"key": k, "xy": xy, "aim": [round(ax, 1), round(ay, 1)], "z": round(float(z), 1)})
+            plan.append({"key": k, "xy": xy, "aim": [round(ax, 1), round(ay, 1)], "page_z": round(float(page), 1), "units": u,
+                         "z": round(z, 1)})
         return plan
 
     def stage_demo(o):
-        """Touch every point at exactly the page height the depth map gives, back to back. A touch that meets the page
-        early (the load jumps first) backs off at once and is reported with how early it was."""
+        """Light-touch every chosen book point back to back, at the book height the touches gave plus ``units`` x 2 mm
+        (no table touch). A touch that meets the page earlier (the load jumps first) backs off at once and is reported;
+        that contact is a measured page height and goes into the model."""
         if not book.px:
             raise StageFail("run the first capture first")
-        if dsc["res"] is None:
-            raise StageFail("run the depth scan first")
         if bm["model"] is None:
             raise StageFail("build the book model first (stage 5)")
+        keys = [k for k in (o.get("points") or DEMO_ORDER) if k in DEMO_ORDER]
         ensure_home()
-        plan = demo_plan()
+        plan = demo_plan(keys, o.get("units"))
         todo = [p for p in plan if "skip" not in p]
         if not todo:
-            raise StageFail("no point has a depth reading")
+            raise StageFail("no chosen point has a believable book height")
         L = tool_len()
         min_tip = max(p["z"] for p in todo) + TRAVEL_MM
         demo["results"] = {p["key"]: {"verdict": "skip", "why": p["skip"]} for p in plan if "skip" in p}
@@ -915,11 +1006,11 @@ def create_app(robot, cfg: dict | None = None) -> Flask:
             if st.estop:
                 raise StageFail("stopped")
             k = p["key"]
-            set_stage("demo", "running", f"touching {DEMO_LABEL[k]} ({n_ + 1} of {len(todo)})")
+            set_stage("demo", "running", f"touching {LABEL[k]} ({n_ + 1} of {len(todo)})")
             zs = [float(z) for z in np.arange(p["z"] + DEMO_FROM_MM, p["z"] - 1e-6, -STEP_MM)]
             try:
                 travel_above(*p["aim"], min_tip)
-                r = ladder(k, DEMO_LABEL[k], p["aim"][0], p["aim"][1], zs, photos="bottom", stage="demo",
+                r = ladder(k, LABEL[k], p["aim"][0], p["aim"][1], zs, photos="bottom", stage="demo",
                            lo=n_ / len(todo), hi=(n_ + 1) / len(todo))
             except StageFail as e:
                 if "stopped" in str(e):
@@ -927,17 +1018,19 @@ def create_app(robot, cfg: dict | None = None) -> Flask:
                 demo["results"][k] = {"verdict": "skip", "why": str(e), "expected_z": p["z"], "aim": p["aim"]}
                 st.say(f"demo: {k} skipped - {e}")
                 continue
+            # contact within one step of the touch height is the touch we wanted; higher than that is early
             early = None if r["how"] == "bottom" else round(r["tip_z"] - p["z"], 1)
-            demo["results"][k] = {"verdict": "on" if r["how"] == "bottom" else "early", "expected_z": p["z"], "aim": p["aim"],
-                                  "xy": p["xy"], "how": r["how"], "contact_z": None if early is None else round(r["tip_z"], 1),
+            verdict = "on" if early is None or early <= STEP_MM else "early"
+            demo["results"][k] = {"verdict": verdict, "expected_z": p["z"], "page_z": p["page_z"], "units": p["units"],
+                                  "aim": p["aim"], "xy": p["xy"], "how": r["how"],
+                                  "contact_z": None if early is None else round(r["tip_z"], 1),
                                   "early_mm": early, "photo": r["photo"], "retreat": r["retreat"]}
             if r["retreat"] == "home":
-                raise StageFail(f"{DEMO_LABEL[k]}: the load stayed high after backing up, so the arm went home - the demo stopped there")
-            what = "table" if k == "tbl" else "page"
+                raise StageFail(f"{LABEL[k]}: the load stayed high after backing up, so the arm went home - the demo stopped there")
             if early is not None:
-                st.say(f"demo: {k} met the {what} {early:+.1f} mm from where the model put it - backed off")
+                st.say(f"demo: {k} met the page {early:+.1f} mm above its touch height ({r['how']}) - backed off")
             else:
-                st.say(f"demo: {k} touched at the expected {what} z {p['z']:.1f} mm")
+                st.say(f"demo: {k} light touch at z {p['z']:.1f} mm ({p['units']} unit(s) above the book at {p['page_z']:.1f})")
         lift_then_home()
         res = demo["results"]
         on = [k for k in DEMO_ORDER if (res.get(k) or {}).get("verdict") == "on"]
@@ -948,37 +1041,41 @@ def create_app(robot, cfg: dict | None = None) -> Flask:
         (dd / f"{time.strftime('%Y%m%d_%H%M%S')}.json").write_text(json.dumps(
             {"taken": demo["taken"], "tool_length_mm": L, "table_z": table_z(), "xy_offset": xy_offset(), "results": res,
              "traces": live["traces"]}, indent=1), encoding="utf-8")
-        msg = f"{len(on)} of {len(todo)} touched at the expected height"
+        msg = f"{len(on)} of {len(todo)} touched at the planned height"
         if early:
             msg += "; met the page early: " + ", ".join(f"{k} {res[k]['early_mm']:+.1f} mm" for k in early)
         if skip:
             msg += "; skipped: " + ", ".join(f"{k} ({res[k]['why']})" for k in skip)
-        # merge the touches into the book model: an early contact is a measured page z; "on" means the page is at (or
-        # just under) the z the model gave, so it is kept at that z
+        # an early contact is a measured page height: merge those into the model (a touch that went all the way down is no
+        # new measurement - the page is somewhere under it)
         old = bm["model"]
-        new = [{"key": k, "kind": "table_check" if k == "tbl" else "demo", "x": float(r["xy"][0]), "y": float(r["xy"][1]), "verdict": r["verdict"],
-                "z": float(r["contact_z"] if r["verdict"] == "early" else r["expected_z"])}
-               for k, r in res.items() if r.get("verdict") in ("on", "early") and r.get("xy")]
-        kept = [t for t in old["touches"] if t["kind"] not in ("demo", "table_check")]
-        m = make_model([{k: t[k] for k in ("key", "kind", "x", "y", "z")} for t in kept] + new, int(old.get("version", 1)) + 1,
-                       bm["stamp"])
-        c = m["correction"]
-        msg += (f". Book model updated with {len(new)} touches (v{m['version']}: {c['kind']} correction, page error "
-                f"{c.get('rms_before', 0):.1f} -> {c.get('rms_after', 0):.1f} mm rms)") if new else ""
-        return ("ok" if not early and not skip else "warn"), msg, {"results": res, "model": bmod.summary(m)}
+        new = [{"key": k, "kind": "demo", "x": float(r["xy"][0]), "y": float(r["xy"][1]), "verdict": "early",
+                "z": float(r["contact_z"])} for k, r in res.items() if r.get("verdict") == "early" and r.get("xy")]
+        data = {"results": res}
+        if new:
+            kept = [t for t in old["touches"] if t["kind"] != "demo"]
+            m = make_model([{k: t[k] for k in ("key", "kind", "x", "y", "z")} for t in kept] + new,
+                           int(old.get("version", 1)) + 1, bm["stamp"])
+            c = m["level"]
+            msg += f". Book model updated with {len(new)} measured page height(s) (v{m['version']}: {c['kind']})"
+            data["model"] = bmod.summary(m)
+        return ("ok" if not early and not skip else "warn"), msg, data
 
     # ---- XY marking calibration (manual, optional): where does the arm really land vs where vision aims? -------------
     xc = {"ev": threading.Event(), "action": None, "waiting": None, "hovered": {}, "clicks": {}, "photo": None, "geom": None,
-          "applied": None, "taken": None, "saved_in": None}
+          "applied": None, "taken": None, "saved_in": None, "results": {}}
 
     def xycal_summary():
         """Landing error per marked point (mark - target, world mm) and the XY correction it gives."""
         if xc["geom"] is None or not xc["clicks"]:
             return None
         rows, d = {}, []
+        from ..vision.geometry import pixel_to_plane
+
+        g = xc["geom"]
         for k in MARK_ORDER:
-            if k in xc["clicks"] and k in xc["hovered"]:
-                a = book.pixel_world(xc["clicks"][k], xc["geom"])[:2]
+            if k in xc["clicks"] and k in xc["hovered"]:                # the mark is on the page at the touched height
+                a = pixel_to_plane([xc["clicks"][k]], g.K, g.T_world_cam, xc["hovered"][k]["hover_z"], g.dist)[0][:2]
                 t = xc["hovered"][k]["xy"]
                 dd = [round(a[0] - t[0], 1), round(a[1] - t[1], 1)]
                 rows[k] = {"target": t, "mark": [round(a[0], 1), round(a[1], 1)], "d_mm": dd}
@@ -993,55 +1090,87 @@ def create_app(robot, cfg: dict | None = None) -> Flask:
                 "applied_mm": [round(float(v), 1) for v in ap], "new_offset_mm": [round(float(v), 1) for v in ap + mean]}
 
     def stage_xycal(o):
-        """Hover the tip just above each point in turn (aimed with the current XY correction) and wait while the person
-        marks the paper under it; then home and a photo, on which the person clicks each mark."""
+        """Touch calibration (XY), straight onto the book:
+          for each ticked point (BL first) go directly over it, come down in 2 mm steps to the book height the Z link
+          measured plus ``units`` steps (the light touch, no pressure), hold a second, and on to the next; then home and a
+          fresh photo, on which the person clicks where each point was really touched -> the XY correction.
+        If the load jumps before that height the page is higher there: that is reported and the touch is made above it."""
         if not book.px:
             raise StageFail("run the first capture first")
-        if bm["model"] is None:
-            raise StageFail("build the book model first (stage 5) - the hover height comes from it")
+        d = depth_cfg()
+        fresh = bool(d.get("z_link_page_at")) and str(d["z_link_page_at"]) >= str(book.taken_at or "")
+        if d.get("z_link_page_tip_z") is None or not fresh:
+            raise StageFail("run the Z link first (after the first capture): it measures the book height at CL that the touches "
+                            "are held above")
+        book_z = float(d["z_link_page_tip_z"])
+        order = ["bl", "tl", "tr", "br", "cl", "cr"]
+        keys = [k for k in order if k in (o.get("points") or ["bl"])]
+        units = {k: int(v) for k, v in (o.get("units") or {}).items() if k in KEYS}
+        if not keys:
+            raise StageFail("choose at least one point")
         ensure_home()
         off = xy_offset() or [0.0, 0.0]
-        pts = []
-        for k in MARK_ORDER:
-            xy = book.demo_xy(k, CORNER_INSET_MM)
-            z = None if xy is None else bmod.z_at(bm["model"], xy[0], xy[1])
-            if z is not None:
-                pts.append((k, xy, [round(xy[0] - off[0], 1), round(xy[1] - off[1], 1)], z))
-        if not pts:
-            raise StageFail("no point has a page height in the book model")
         xc.update(hovered={}, clicks={}, photo=None, geom=None, applied=list(off), taken=time.strftime("%Y-%m-%d %H:%M:%S"),
-                  saved_in=None)
-        L, min_tip = tool_len(), max(p[3] for p in pts) + TRAVEL_MM
+                  saved_in=None, results={})
+        live["traces"], live["expected"] = {}, {}
+        L, results = tool_len(), {}
         try:
-            for n_, (k, xy, aim, z) in enumerate(pts):
+            for n_, k in enumerate(keys):
                 if st.estop:
                     raise StageFail("stopped")
-                set_progress("xycal", n_ / len(pts), f"{LABEL[k]}: moving over it")
-                travel_above(aim[0], aim[1], min_tip)
-                hz = z + MARK_HOVER_MM
-                ps = flange_for_tip([aim[0], aim[1], hz], robot.end_pose(), L)
-                if (why := in_limits(ps, hz - 1.0)) is not None:
-                    raise StageFail(f"{LABEL[k]}: {why}")
-                slow_block(lambda: robot.move_to(ps))
-                xc["ev"].clear()
-                xc["waiting"], xc["action"] = k, None
-                set_progress("xycal", (n_ + 0.5) / len(pts), f"{LABEL[k]}: mark the paper under the tip, then press 'Marked'")
-                st.say(f"xy marking: the tip is {MARK_HOVER_MM:g} mm above {LABEL[k]} - mark the paper under it, then press 'Marked'")
-                while not xc["ev"].wait(0.2):
-                    if st.estop:
-                        raise StageFail("stopped")
-                if xc["action"] != "skip":
-                    xc["hovered"][k] = {"xy": xy, "aim": aim, "hover_z": round(hz, 1)}
+                xy = book.demo_xy(k, CORNER_INSET_MM)
+                if xy is None:
+                    results[k] = {"skip": "no point"}
+                    continue
+                aim = [round(xy[0] - off[0], 1), round(xy[1] - off[1], 1)]
+                u = max(0, min(5, units.get(k, 1)))
+                hold = book_z + u * STEP_MM
+                if hold < tip_floor():
+                    results[k] = {"skip": f"touch z {hold:.1f} is below the tip floor {tip_floor():g}"}
+                    continue
+                set_progress("xycal", n_ / len(keys), f"{LABEL[k]}: moving over it")
+                travel_above(aim[0], aim[1], hold + 40.0)
+                zs = [float(v) for v in np.arange(hold + 14.0, hold - 1e-6, -STEP_MM)]   # straight down onto the touch height
+                r = ladder("tc_" + k, LABEL[k], aim[0], aim[1], zs, photos="bottom", stage="xycal",
+                           lo=n_ / len(keys), hi=(n_ + 0.8) / len(keys))
+                if r["retreat"] == "home":
+                    raise StageFail(f"{LABEL[k]}: the load stayed high after backing off, so the arm went home")
+                early = None
+                if r["how"] != "bottom":                               # the page is higher here than the Z link height
+                    early = round(float(r["tip_z"]) - book_z, 1)
+                    hold = float(r["tip_z"]) + u * STEP_MM
+                    st.say(f"touch calibration: {k}: met the page at {r['tip_z']:.1f}, {early:+.1f} mm above the Z link height - "
+                           f"touching {u} unit(s) above that instead")
+                ps = flange_for_tip([aim[0], aim[1], hold], robot.end_pose(), L)
+                slow_block(lambda: guarded_move(ps, LABEL[k] + " light touch"))
+                st.say(f"touch calibration: {k}: light touch at {hold:.1f} ({u} unit(s) above {hold - u * STEP_MM:.1f})")
+                results[k] = {"xy": xy, "aim": aim, "book_z": round(hold - u * STEP_MM, 1), "units": u, "touch_z": round(hold, 1),
+                              "early_mm": early, "contact_z": None if early is None else round(float(r["tip_z"]), 1),
+                              "photo": r["photo"]}
+                xc["hovered"][k] = {"xy": xy, "aim": aim, "hover_z": round(hold, 1)}
+                xc["results"] = dict(results)                           # shown as it goes
+                time.sleep(1.0)                                         # a moment at the light touch, then on
+        except StageFail as e:
+            if "stopped" not in str(e):                                 # anything but STOP: back up and home, so it can be retried
+                try:
+                    lift_then_home()
+                except Exception as e2:  # noqa: BLE001
+                    st.say(f"touch calibration: could not get home after the failure: {e2}")
+            raise
         finally:
             xc["waiting"] = None
-        if st.estop:
-            raise StageFail("stopped")
-        set_progress("xycal", 0.95, "going home for the photo of the marks")
+            xc["results"] = results
+        touched = {k: v for k, v in results.items() if "touch_z" in v}
+        save_depth_cfg({"touchcal": {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "book_z": book_z,
+                                     "points": touched}})
+        drop_model()
+        set_progress("xycal", 0.97, "back to home for the marking photo")
         lift_then_home()
         time.sleep(0.5)
         xc["photo"], xc["geom"] = robot.capture(), robot.camera_geometry()
-        return "warn", (f"{len(xc['hovered'])} point(s) marked. Now click each mark on the photo (viewer: 'XY marks'), "
-                        "then press 'Save the XY correction'."), {"hovered": xc["hovered"]}
+        pz = ", ".join(f"{k} {v['touch_z']:.1f} (Z link {v['book_z']:.1f} + {v['units']})" for k, v in touched.items())
+        return "warn", (f"light touches at {pz or 'none'}. Back at home: in the viewer's 'XY marks' click where each point was "
+                        "really touched and press 'Save the XY correction'."), {"results": results, "book_z": book_z}
 
     STAGE_FN = {"level": stage_level, "capture": stage_capture, "depth": stage_depth, "zlink": stage_zlink, "model": stage_model,
                 "xycal": stage_xycal, "demo": stage_demo}
@@ -1074,6 +1203,9 @@ def create_app(robot, cfg: dict | None = None) -> Flask:
                         break
                     set_stage(k, state, msg, data)
                     mark_stale([d for d in DEPENDS.get(k, []) if d not in ids])
+                    if k == "model" and state == "warn" and len(ids) > 1:     # never touch the book on a doubtful model
+                        st.say("Run all stopped after the book model: it needs checking before anything touches the book")
+                        break
             finally:
                 flow["running"], flow["auto"] = None, False
                 live["active"] = False
@@ -1209,7 +1341,7 @@ def create_app(robot, cfg: dict | None = None) -> Flask:
 
             def work():
                 try:
-                    go_home_blocking()
+                    lift_then_home()                             # straight up first if low (over the book)
                 except Exception as e:  # noqa: BLE001
                     st.say(f"go home failed: {e}")
                 finally:
@@ -1269,6 +1401,7 @@ def create_app(robot, cfg: dict | None = None) -> Flask:
             demo={"results": demo["results"], "order": demo["order"], "taken": demo["taken"]},
             model=None if bm["model"] is None else {**bmod.summary(bm["model"]), "dir": bm["dir"]},
             xycal={"waiting": xc["waiting"], "hovered": xc["hovered"], "clicks": xc["clicks"], "has_photo": xc["photo"] is not None,
+                   "results": xc["results"],
                    "summary": xycal_summary(), "saved_in": xc["saved_in"],
                    "calibration": gui_cfg().get("calibration")})
 
@@ -1348,12 +1481,51 @@ def create_app(robot, cfg: dict | None = None) -> Flask:
         st.say(f"z link: table spot locked at ({x:.0f}, {y:.0f})")
         return jsonify(ok=True, lock=[round(x, 1), round(y, 1)])
 
+    @app.post("/api/flip/run")
+    def flip_run():
+        """The taught page flip (bookworm/gui/flip.py) at 2x the teaching speed, from home, back home. ``tuck``: also try
+        sliding the flipped page under the holder (experimental)."""
+        from . import flip
+
+        if (r := arm_blocked()) is not None:
+            return r
+        pts = {k: book.world3(k) for k in ("bl", "tl", "cl", "cr")}
+        page_z = depth_cfg().get("z_link_page_tip_z")
+        if any(v is None for v in pts.values()) or page_z is None:
+            return jsonify(error="needs the first capture and the Z link (book height)"), 409
+        f = flip.frame(pts["bl"], pts["tl"], pts["cl"], pts["cr"], xy_offset() or [0.0, 0.0], page_z, tool_len())
+        steps = flip.plan(f, tuck=bool((request.get_json(silent=True) or {}).get("tuck")))
+
+        def work():
+            t0 = time.time()
+            try:
+                ensure_home()
+                robot.set_speed(flip.FAST_DEG_S)
+                flip.run(robot, steps, say=st.say, stopped=lambda: st.estop)
+                robot.set_speed(flip.HOME_DEG_S)
+                robot.move_joints(st.cfg["home_joints"])
+                st.say(f"page flip done in {time.time() - t0:.0f} s")
+            except Exception as e:  # noqa: BLE001
+                st.say(f"page flip stopped: {e}")
+            finally:
+                try:
+                    robot.set_speed(speeds()[1])
+                except Exception:  # noqa: BLE001
+                    pass
+                st.moving = False
+
+        st.moving = True
+        threading.Thread(target=work, daemon=True).start()
+        return jsonify(ok=True, steps=len(steps))
+
     @app.post("/api/demo/plan")
     def demo_plan_route():
         """Dry run of the touch demo: where each point would be touched and at what z. Nothing moves."""
         if not book.px or dsc["res"] is None:
             return jsonify(error="run the first capture and the depth scan first"), 409
-        return jsonify(points=demo_plan(), xy_offset=xy_offset(), table_z=table_z(), table_measured=table_measured())
+        b = request.get_json(force=True, silent=True) or {}
+        return jsonify(points=demo_plan(b.get("points"), b.get("units")), xy_offset=xy_offset(), table_z=table_z(),
+                       table_measured=table_measured(), driven=None if bm["model"] is None else bm["model"].get("driven"))
 
     @app.post("/api/xycal/next")
     def xycal_next():
@@ -1386,6 +1558,18 @@ def create_app(robot, cfg: dict | None = None) -> Flask:
             xc["clicks"][k] = [round(u, 1), round(v, 1)]
         return jsonify(ok=True, summary=xycal_summary())
 
+    @app.post("/api/xycal/photo")
+    def xycal_retake():
+        """A fresh photo for marking, from home (the arm must be at home and still)."""
+        if (r := arm_blocked()) is not None:
+            return r
+        if not xc["hovered"]:
+            return jsonify(error="run the touch calibration first"), 409
+        if not at_home():
+            return jsonify(error="the arm is not at home - the marks are read from the home view"), 409
+        xc["photo"], xc["geom"] = robot.capture(), robot.camera_geometry()
+        return jsonify(ok=True)
+
     @app.get("/xycal/photo.jpg")
     def xycal_photo():
         return Response(status=204) if xc["photo"] is None else jpeg(xycal_drawn(), 85)
@@ -1394,7 +1578,7 @@ def create_app(robot, cfg: dict | None = None) -> Flask:
         """The photo of the marks with each target (yellow ring) and each clicked mark (red x)."""
         img, g = xc["photo"].copy(), xc["geom"]
         for k, hv in xc["hovered"].items():
-            t = book._project(g, [[*hv["xy"], book.surface_z(*hv["xy"])]])[0]
+            t = book._project(g, [[*hv["xy"], hv["hover_z"]]])[0]
             c = (int(t[0]), int(t[1]))
             cv2.circle(img, c, 10, (0, 220, 255), 2)
             cv2.putText(img, k, (c[0] + 12, c[1] - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 220, 255), 2)
@@ -1416,7 +1600,7 @@ def create_app(robot, cfg: dict | None = None) -> Flask:
         cv2.imwrite(str(d / "marked.jpg"), xycal_drawn())
         g = xc["geom"]
         (d / "calibration.json").write_text(json.dumps({
-            "taken_at": xc["taken"], "kind": "xy marking", "tool_length_mm": tool_len(), "hover_above_page_mm": MARK_HOVER_MM,
+            "taken_at": xc["taken"], "kind": "xy marking", "tool_length_mm": tool_len(),
             "K": g.K.tolist(), "T_world_cam": g.T_world_cam.tolist(), "hovered": xc["hovered"], "clicks": xc["clicks"],
             "summary": s_}, indent=2), encoding="utf-8")
         save_local({"gui": {"calibration": {"offset_mm": s_["new_offset_mm"], "rms_mm": s_["rms_mm"], "spread_mm": s_["spread_mm"],

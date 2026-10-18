@@ -161,5 +161,5 @@ def test_page_has_only_the_new_setup(app):
     html = c.get("/").get_data(as_text=True)
     for gone in ("Moondream", "Save calibration", "apply saved offset", "Probe all six", ">Record<"):
         assert gone not in html
-    for there in ("Touch demo", "Z link", "Book model", "XY marking", "tool length", "Lock the arm's spot"):
+    for there in ("Touch demo", "Z link", "Book model", "Touch calibration", "tool length", "Lock the arm's spot"):
         assert there in html

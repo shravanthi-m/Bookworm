@@ -118,14 +118,13 @@ gui:                        # local dev GUI (python -m bookworm gui). Setup: 1 h
     z: [120, 600]
   depth:                    # measured values (table_slope, arm_offset_mm, ...) are written to config/local.yaml by the stages
     arm_offset_mm: 0        # the table top's z in the arm frame: measured by stage 4 (z link)
-    scan_mode: pass         # stage 3: pass = six views around home at home height; home = one view, no motion
-    pass_offsets_mm:        # camera-pass views: (dx, dy) from home at the same height; refused moves are skipped
-      - [0, 0]
-      - [80, 0]
+    scan_mode: pass         # stage 3: pass = views around the book's midpoint at home height; home = one view, no motion
+    pass_offsets_mm:        # camera-pass views: (dx, dy) around the book midpoint (from the first capture) at home height;
+      - [0, 0]              # refused moves are skipped
+      - [70, 0]
+      - [-70, 0]
       - [0, 80]
       - [0, -80]
-      - [80, 70]
-      - [80, -70]
     height_settle_s: 0.4    # touch ladders: wait after each step before reading the pose and the load
     height_step_wait_s: 1.2 # z link: time to press "It's touching" at each step (the press is the fallback to the load)
     z_link_search_below_mm: 10  # the z link lowers the tip at most this far below the expected table z
